@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="200px" height="40px" viewBox="0 0 200 40" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <g fill="none" fill-rule="evenodd">
+        <path d="M15,8 L35,8 C36.6568,8 38,9.34315 38,11 L38,29 C38,30.6569 36.6568,32 35,32 L15,32 C13.3431,32 12,30.6569 12,29 L12,11 C12,9.34315 13.3431,8 15,8 Z" fill="#1976D2"></path>
+        <path d="M16,16 L22,16 C22.5523,16 23,16.4477 23,17 L23,23 C23,23.5523 22.5523,24 22,24 L16,24 C15.4477,24 15,23.5523 15,23 L15,17 C15,16.4477 15.4477,16 16,16 Z" fill="#FFFFFF"></path>
+        <path d="M34,16 L28,16 C27.4477,16 27,16.4477 27,17 L27,23 C27,23.5523 27.4477,24 28,24 L34,24 C34.5523,24 35,23.5523 35,23 L35,17 C35,16.4477 34.5523,16 34,16 Z" fill="#FFFFFF"></path>
+        <path d="M25,8 L25,32" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"></path>
+        <path d="M18,32 L18,36" stroke="#1976D2" stroke-width="2" stroke-linecap="round"></path>
+        <path d="M32,32 L32,36" stroke="#1976D2" stroke-width="2" stroke-linecap="round"></path>
+        <path d="M25,4 L25,8" stroke="#1976D2" stroke-width="2" stroke-linecap="round"></path>
+        
+        <text font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#333333">
+            <tspan x="45" y="25">VoiceForge</tspan>
+        </text>
+    </g>
+</svg>

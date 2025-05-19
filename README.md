@@ -1,92 +1,159 @@
-# VoiceForge: Website Crawling and Content Processing System
+# VoiceForge
 
-VoiceForge is a standalone service that analyzes company websites to create bespoke language models that can generate content in the company's unique voice and positioning. This service will eventually be integrated with a Reddit Scanner application via API.
+VoiceForge is a website crawling and content processing system designed to analyze company websites to create bespoke language models that can generate content in a company's unique voice and positioning.
 
-## Project Structure
+## Overview
 
-The project is divided into two main components:
+VoiceForge analyzes company websites to extract and process content, which can then be used to train language models that generate content matching the company's voice and brand. The system is built with a Python backend and React frontend.
 
-### Backend (Python)
-- Website crawler infrastructure
-- Content extraction & processing
-- Content database design & implementation
-- Initial relevance scoring system
+This project is structured as a full-stack application with the following components:
 
-### Frontend (React)
-- Admin dashboard for monitoring crawl progress
-- Configuration interface for crawl parameters
-- Content search and browsing capabilities
+### Backend Features
+- **Website Crawler Infrastructure**: A robust crawler that can recursively scan websites, respecting robots.txt and implementing rate limiting
+- **Content Extraction & Processing**: Intelligent extraction of meaningful content from websites
+- **Content Database**: Efficient storage of crawled website content
+- **Relevance Scoring System**: Text analysis to identify key topics and terms
+
+### Frontend Features
+- **Admin Dashboard**: Monitor and manage crawl jobs
+- **Content Search**: Search and view extracted content
+- **Configuration Interface**: Customize crawler settings
+
+## Tech Stack
+
+### Backend
+- **Language**: Python
+- **Framework**: FastAPI
+- **Database**: PostgreSQL with pgvector extension
+- **Web Scraping**: Playwright for JavaScript rendering
+- **NLP**: SpaCy, scikit-learn, sentence-transformers
+- **Container**: Docker
+
+### Frontend
+- **Framework**: React
+- **UI Library**: Material UI
+- **State Management**: React Hooks
+- **Routing**: React Router
+- **API Client**: Axios
+- **Build Tool**: Vite
 
 ## Installation & Setup
 
-### Backend
-1. Navigate to the backend directory
-```bash
-cd backend
-```
+### Prerequisites
+- Docker and Docker Compose
+- Node.js 16+ (for local development)
+- Python 3.9+ (for local development)
 
-2. Create a virtual environment
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+### Using Docker Compose (Recommended)
+1. Clone the repository
+   ```bash
+   git clone https://github.com/yourusername/voice-forge.git
+   cd voice-forge
+   ```
+
+2. Start the services
+   ```bash
+   docker-compose up -d
+   ```
+
+3. Access the application
+   - Frontend: http://localhost:3000
+   - API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
+
+### Manual Setup
+
+#### Backend
+1. Navigate to the backend directory
+   ```bash
+   cd backend
+   ```
+
+2. Create and activate a virtual environment
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
 3. Install dependencies
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 4. Install Playwright browsers
-```bash
-playwright install
-```
+   ```bash
+   playwright install chromium
+   ```
 
-5. Set up the database
-```bash
-alembic upgrade head
-```
+5. Set up PostgreSQL with pgvector extension
+   - Create a database named "voiceforge"
+   - Create a user "postgres" with password "postgres" (or modify .env file)
+   - Install pgvector extension in the database
 
-6. Start the backend server
-```bash
-uvicorn api.main:app --reload
-```
+6. Run migrations
+   ```bash
+   alembic upgrade head
+   ```
 
-### Frontend
+7. Start the API server
+   ```bash
+   uvicorn api.main:app --reload
+   ```
+
+#### Frontend
 1. Navigate to the frontend directory
-```bash
-cd frontend
-```
+   ```bash
+   cd frontend
+   ```
 
 2. Install dependencies
-```bash
-npm install
-```
+   ```bash
+   npm install
+   ```
 
 3. Start the development server
-```bash
-npm run dev
+   ```bash
+   npm run dev
+   ```
+
+## Usage
+
+1. Access the application at http://localhost:3000
+2. Go to the "New Crawl" page and enter a domain URL to start crawling
+3. Monitor the crawl progress on the dashboard
+4. Once content is extracted, use the Content Search page to explore and analyze the content
+
+## Project Structure
+
+```
+voice-forge/
+├── backend/                     # Python backend application
+│   ├── api/                     # API endpoints and models
+│   ├── crawler/                 # Website crawler implementation
+│   ├── processor/               # Content processing and analysis
+│   ├── database/                # Database models and access
+│   ├── requirements.txt         # Python dependencies
+│   └── Dockerfile               # Backend Docker configuration
+├── frontend/                    # React frontend application
+│   ├── public/                  # Static assets
+│   ├── src/                     # React source code
+│   │   ├── components/          # Reusable UI components
+│   │   ├── pages/               # Application pages
+│   │   └── services/            # API services
+│   ├── package.json             # Frontend dependencies
+│   └── Dockerfile               # Frontend Docker configuration
+├── docker-compose.yml           # Docker Compose configuration
+└── README.md                    # Project documentation
 ```
 
-## Features
+## Future Development
+- Integration with language models for content generation
+- Advanced analytics and reporting
+- Extensible plugin system for custom content processors
+- Integration with content management systems
 
-- Website crawling with respect for robots.txt and rate limiting
-- Support for JavaScript-rendered content
-- Intelligent content extraction from various website layouts
-- Content categorization and metadata extraction
-- PostgreSQL database with vector similarity capabilities
-- RESTful API with OpenAPI/Swagger documentation
-- Admin dashboard for monitoring and configuration
-- Initial relevance scoring system
+## License
+This project is proprietary and not licensed for public use.
 
-## Technical Architecture
-
-- **Backend**: Python with FastAPI
-- **Frontend**: React with TypeScript
-- **Database**: PostgreSQL with pgvector extension
-- **Deployment**: Docker containerization
-- **Web Scraping**: Playwright for JavaScript rendering
-- **Text Processing**: SpaCy, NLTK, and Transformers for NLP
-
-## Development Status
-
-This project is currently in Phase I, focusing on creating a solid foundation for website crawling, content extraction, and storage.
+## Acknowledgements
+This project was built using various open-source libraries and frameworks. We thank the community for their contributions.

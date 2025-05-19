@@ -76,11 +76,19 @@ class ContentExtractor:
             comment.extract()
         
         # Remove script and style elements
-        for tag in soup(["script", "style", "iframe", "noscript"]):
+        for tag in soup(["script", "style", "iframe", "noscript", "header", "footer", "nav"]):
             tag.decompose()
         
         # Remove hidden elements
         for tag in soup.find_all(style=lambda value: value and "display:none" in value):
+            tag.decompose()
+        
+        # Remove social media widgets
+        for tag in soup.find_all(class_=lambda c: c and any(social in c.lower() for social in ['social', 'share', 'twitter', 'facebook', 'linkedin'])):
+            tag.decompose()
+        
+        # Remove navigation elements
+        for tag in soup.find_all(id=lambda i: i and any(nav in i.lower() for nav in ['nav', 'menu', 'header', 'footer'])):
             tag.decompose()
     
     def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
@@ -123,13 +131,13 @@ class ContentExtractor:
         
         # Try common content div IDs/classes
         if not main_container:
-            for id_value in ["content", "main-content", "post", "article"]:
+            for id_value in ["content", "main-content", "post", "article", "entry-content", "post-content"]:
                 element = soup.find(id=id_value)
                 if element:
                     main_container = element
                     break
             
-            for class_value in ["content", "post", "article", "entry", "blog-post"]:
+            for class_value in ["content", "post", "article", "entry", "blog-post", "post-content", "entry-content"]:
                 element = soup.find(class_=class_value)
                 if element:
                     main_container = element
@@ -156,6 +164,11 @@ class ContentExtractor:
         content = re.sub(r'\s+', ' ', content)
         content = re.sub(r'\n\s*\n', '\n\n', content)
         
+        # Remove very short content
+        if len(content) < 100:
+            logger.info(f"Content too short on {url}: {len(content)} characters")
+            return None, content_type
+        
         return content.strip(), content_type
     
     def _identify_content_type(self, soup: BeautifulSoup, url: str) -> ContentType:
@@ -175,14 +188,29 @@ class ContentExtractor:
             return ContentType.FAQ
         elif re.search(r'/docs/|/documentation/', path):
             return ContentType.DOCUMENTATION
+        elif path == '/' or path == '':
+            return ContentType.LANDING_PAGE
         
-        # Check for product schemas
-        if soup.find("div", {"itemtype": "http://schema.org/Product"}):
-            return ContentType.PRODUCT_DESCRIPTION
+        # Check for schema.org types
+        for item_type in soup.find_all(attrs={"itemtype": True}):
+            item_type_value = item_type.get("itemtype", "").lower()
+            if "product" in item_type_value:
+                return ContentType.PRODUCT_DESCRIPTION
+            elif "article" in item_type_value:
+                return ContentType.ARTICLE
+            elif "newsarticle" in item_type_value:
+                return ContentType.NEWS
         
-        # Check for article schemas
-        if soup.find("article") or soup.find("div", {"itemtype": "http://schema.org/Article"}):
-            return ContentType.ARTICLE
+        # Check for typical about page content
+        about_terms = ["about us", "our story", "our mission", "our team", "who we are"]
+        page_text = soup.get_text().lower()
+        if any(term in page_text for term in about_terms):
+            return ContentType.ABOUT_PAGE
+        
+        # Check for blog indicators
+        blog_indicators = ["posted on", "published on", "comments", "author", "categories", "tags"]
+        if any(indicator in page_text for indicator in blog_indicators):
+            return ContentType.BLOG_POST
         
         # Default to other
         return ContentType.OTHER
@@ -195,9 +223,9 @@ class ContentExtractor:
         metadata.title = self._extract_title(soup)
         
         # Extract author
-        author_tag = soup.find("meta", {"name": "author"})
-        if author_tag:
-            metadata.author = author_tag.get("content")
+        author_meta = soup.find("meta", {"name": "author"})
+        if author_meta:
+            metadata.author = author_meta.get("content")
         
         # Try schema.org author
         if not metadata.author:
@@ -205,45 +233,79 @@ class ContentExtractor:
             if author_element:
                 metadata.author = author_element.get_text().strip()
         
+        # Try byline
+        if not metadata.author:
+            byline = soup.find(class_=lambda c: c and any(byline in c.lower() for byline in ['byline', 'author']))
+            if byline:
+                metadata.author = byline.get_text().strip()
+        
         # Extract publication date
-        date_tags = soup.find_all("meta", {"property": ["article:published_time", "og:published_time"]})
-        if date_tags:
-            try:
-                metadata.publication_date = datetime.fromisoformat(date_tags[0].get("content").replace("Z", "+00:00"))
-            except:
-                pass
+        for meta_tag in soup.find_all("meta"):
+            property_value = meta_tag.get("property", "").lower()
+            name_value = meta_tag.get("name", "").lower()
+            
+            if property_value in ["article:published_time", "og:published_time"] or name_value == "pubdate":
+                try:
+                    date_str = meta_tag.get("content")
+                    if date_str:
+                        metadata.publication_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                except:
+                    pass
+        
+        # Try time tag with datetime attribute
+        if not metadata.publication_date:
+            time_tag = soup.find("time")
+            if time_tag and time_tag.has_attr("datetime"):
+                try:
+                    date_str = time_tag["datetime"]
+                    metadata.publication_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                except:
+                    pass
         
         # Extract last modified date
-        modified_tags = soup.find_all("meta", {"property": ["article:modified_time", "og:updated_time"]})
-        if modified_tags:
-            try:
-                metadata.last_modified = datetime.fromisoformat(modified_tags[0].get("content").replace("Z", "+00:00"))
-            except:
-                pass
+        for meta_tag in soup.find_all("meta"):
+            property_value = meta_tag.get("property", "").lower()
+            name_value = meta_tag.get("name", "").lower()
+            
+            if property_value in ["article:modified_time", "og:updated_time"] or name_value == "lastmod":
+                try:
+                    date_str = meta_tag.get("content")
+                    if date_str:
+                        metadata.last_modified = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                except:
+                    pass
         
         # Extract language
-        lang_attr = soup.html.get("lang") if soup.html else None
-        if lang_attr:
-            metadata.language = lang_attr.split("-")[0]
+        html_tag = soup.html
+        if html_tag and html_tag.has_attr("lang"):
+            lang_attr = html_tag["lang"]
+            if lang_attr:
+                metadata.language = lang_attr.split("-")[0]
         
-        # Extract categories and tags
+        # Extract categories
         for meta_tag in soup.find_all("meta", {"property": "article:section"}):
-            metadata.categories.append(meta_tag.get("content"))
+            category = meta_tag.get("content")
+            if category and category not in metadata.categories:
+                metadata.categories.append(category)
         
+        # Try to extract categories from breadcrumbs or category links
+        for element in soup.find_all(class_=lambda c: c and "category" in c.lower()):
+            for link in element.find_all("a"):
+                text = link.get_text().strip()
+                if text and text not in metadata.categories:
+                    metadata.categories.append(text)
+        
+        # Extract tags
         for meta_tag in soup.find_all("meta", {"property": "article:tag"}):
-            metadata.tags.append(meta_tag.get("content"))
+            tag = meta_tag.get("content")
+            if tag and tag not in metadata.tags:
+                metadata.tags.append(tag)
         
-        # Try to extract categories and tags from links
-        category_links = soup.find_all("a", href=lambda href: href and "category" in href)
-        for link in category_links:
-            text = link.get_text().strip()
-            if text and text not in metadata.categories:
-                metadata.categories.append(text)
-        
-        tag_links = soup.find_all("a", href=lambda href: href and "tag" in href)
-        for link in tag_links:
-            text = link.get_text().strip()
-            if text and text not in metadata.tags:
-                metadata.tags.append(text)
+        # Try to extract tags from tag links
+        for element in soup.find_all(class_=lambda c: c and "tag" in c.lower()):
+            for link in element.find_all("a"):
+                text = link.get_text().strip()
+                if text and text not in metadata.tags and text not in metadata.categories:
+                    metadata.tags.append(text)
         
         return metadata

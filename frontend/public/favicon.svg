@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256px" height="256px" viewBox="0 0 256 256" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <g fill="none" fill-rule="evenodd">
+        <rect fill="#1976D2" x="0" y="0" width="256" height="256" rx="32"></rect>
+        <path d="M60,76 L196,76 C204.837,76 212,83.163 212,92 L212,164 C212,172.837 204.837,180 196,180 L60,180 C51.163,180 44,172.837 44,164 L44,92 C44,83.163 51.163,76 60,76 Z" fill="#FFFFFF"></path>
+        <path d="M68,112 L100,112 C102.209,112 104,113.791 104,116 L104,140 C104,142.209 102.209,144 100,144 L68,144 C65.7909,144 64,142.209 64,140 L64,116 C64,113.791 65.7909,112 68,112 Z" fill="#1976D2"></path>
+        <path d="M188,112 L156,112 C153.791,112 152,113.791 152,116 L152,140 C152,142.209 153.791,144 156,144 L188,144 C190.209,144 192,142.209 192,140 L192,116 C192,113.791 190.209,112 188,112 Z" fill="#1976D2"></path>
+        <path d="M128,76 L128,180" stroke="#1976D2" stroke-width="12" stroke-linecap="round"></path>
+        <path d="M80,180 L80,204" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"></path>
+        <path d="M176,180 L176,204" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"></path>
+        <path d="M128,52 L128,76" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"></path>
+    </g>
+</svg>
