@@ -1,0 +1,63 @@
+{
+  "timestamp": "2025-05-26T12:45:14.464952",
+  "configuration": {
+    "vector_provider": "database",
+    "has_openai_key": true,
+    "has_anthropic_key": false,
+    "postgres_connection": true,
+    "pgvector_installed": true
+  },
+  "database_health": {
+    "content_count": 1,
+    "chunk_count": 1,
+    "template_count": 0,
+    "content_with_embeddings": 0,
+    "chunks_with_embeddings": 0,
+    "content_embedding_ratio": 0.0,
+    "chunk_embedding_ratio": 0.0,
+    "domains": [
+      "https://pmm.voyant.io"
+    ]
+  },
+  "performance_metrics": {
+    "error": "No module named 'processor.embeddings'"
+  },
+  "data_quality": {
+    "domain_stats": {
+      "https://pmm.voyant.io": {
+        "total": 1,
+        "processed": 0,
+        "types": [
+          "landing_page"
+        ],
+        "processing_ratio": 0.0
+      }
+    },
+    "chunk_stats": {
+      "count": 1,
+      "avg_size": 249.0,
+      "min_size": 249,
+      "max_size": 249
+    }
+  },
+  "recommendations": [
+    {
+      "priority": "MEDIUM",
+      "category": "Data Quality",
+      "issue": "Only 0.0% of content has embeddings",
+      "solution": "Process existing content to generate embeddings",
+      "command": "python scripts/process_content_for_rag.py"
+    },
+    {
+      "priority": "MEDIUM",
+      "category": "Data Quality",
+      "issue": "Only 0.0% of chunks have embeddings",
+      "solution": "Process content chunks to generate embeddings",
+      "command": "python scripts/vector_optimization/optimize_embeddings.py"
+    }
+  ],
+  "next_steps": [
+    "Generate embeddings for existing content",
+    "Generate embeddings for content chunks"
+  ]
+}

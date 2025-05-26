@@ -59,8 +59,10 @@ const ContentSearch = () => {
   const handleSearch = async () => {
     setLoading(true)
     try {
+      // Use an empty string if no search query is provided
+      // This will retrieve all content
       const searchResults = await apiService.searchContent(
-        searchQuery,
+        searchQuery || "",  // Empty string for blank search
         domain || null,
         contentType || null,
         limit,
@@ -339,8 +341,8 @@ const ContentSearch = () => {
           ) : (
             <Typography variant="body1" color="textSecondary" sx={{ py: 4, textAlign: 'center' }}>
               {searchQuery
-                ? 'No results found for your search criteria'
-                : 'Enter a search query to find content'}
+                ? 'No results found for your search criteria. Try a different search or select "All Domains".'
+                : 'Click the Search button to see all content, or enter search terms to filter.'}
             </Typography>
           )}
           

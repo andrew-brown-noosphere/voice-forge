@@ -1,0 +1,93 @@
+{
+  "rag_response": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "You are a helpful AI assistant for VoiceForge. Answer the question based on the provided context. If the answer is not in the context, say you don't know."
+      },
+      {
+        "role": "user",
+        "content": "Context: {{context}}\n\nQuestion: {{query}}"
+      }
+    ],
+    "anthropic": "You are a helpful AI assistant for VoiceForge. Answer the question based on the provided context. If the answer is not in the context, say you don't know.\n\nContext: {{context}}\n\nQuestion: {{query}}"
+  },
+  "query_reformulation": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "Generate 3 alternative search queries that might help retrieve relevant information for the original query. Return only the queries, one per line."
+      },
+      {
+        "role": "user",
+        "content": "Original query: {{query}}"
+      }
+    ],
+    "anthropic": "Generate 3 alternative search queries that might help retrieve relevant information for the original query. Return only the queries, one per line.\n\nOriginal query: {{query}}"
+  },
+  "content_generation": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "Generate {{platform}} content in a {{tone}} tone based on the context. The content should be concise, engaging, and tailored to the platform's best practices. Target audience is {{audience}}."
+      },
+      {
+        "role": "user",
+        "content": "Topic: {{topic}}\nContext: {{context}}"
+      }
+    ],
+    "anthropic": "Generate {{platform}} content in a {{tone}} tone based on the context. The content should be concise, engaging, and tailored to the platform's best practices. Target audience is {{audience}}.\n\nTopic: {{topic}}\nContext: {{context}}"
+  },
+  "key_points_extraction": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "Extract the 3-5 most important key points from the following text. Return each key point on a new line starting with a dash (-)."
+      },
+      {
+        "role": "user",
+        "content": "{{text}}"
+      }
+    ],
+    "anthropic": "Extract the 3-5 most important key points from the following text. Return each key point on a new line starting with a dash (-).\n\nText: {{text}}"
+  },
+  "marketing_analysis": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "Analyze the following marketing content. Identify key messaging, target audience, tone, and suggested improvements."
+      },
+      {
+        "role": "user",
+        "content": "{{content}}"
+      }
+    ],
+    "anthropic": "Analyze the following marketing content. Identify key messaging, target audience, tone, and suggested improvements.\n\nContent: {{content}}"
+  },
+  "social_media_post": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "Create a {{platform}} post in a {{tone}} tone about the following topic. Include relevant hashtags and a call to action."
+      },
+      {
+        "role": "user",
+        "content": "Topic: {{topic}}\nContext: {{context}}"
+      }
+    ],
+    "anthropic": "Create a {{platform}} post in a {{tone}} tone about the following topic. Include relevant hashtags and a call to action.\n\nTopic: {{topic}}\nContext: {{context}}"
+  },
+  "email_campaign": {
+    "openai": [
+      {
+        "role": "system",
+        "content": "Draft an email campaign in a {{tone}} tone about the following topic. Include a compelling subject line, engaging body, and clear call to action."
+      },
+      {
+        "role": "user",
+        "content": "Topic: {{topic}}\nContext: {{context}}"
+      }
+    ],
+    "anthropic": "Draft an email campaign in a {{tone}} tone about the following topic. Include a compelling subject line, engaging body, and clear call to action.\n\nTopic: {{topic}}\nContext: {{context}}"
+  }
+}

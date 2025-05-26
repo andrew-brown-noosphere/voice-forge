@@ -136,3 +136,47 @@ class CrawlerService:
     def list_crawls(self, limit: int, offset: int) -> List[CrawlStatus]:
         """List all crawl jobs with pagination."""
         return self.db.list_crawl_statuses(limit, offset)
+    
+    def delete_all_crawls(self):
+        """Delete all crawls and associated content."""
+        try:
+            logger.info("Starting deletion of all crawls and associated content")
+            
+            # Cancel any active crawls first
+            for crawl_id in list(self.active_crawls.keys()):
+                logger.info(f"Cancelling active crawl: {crawl_id}")
+                self.cancel_crawl(crawl_id)
+            
+            # Clear in-memory references
+            self.active_crawls = {}
+            self.crawl_statuses = {}
+            
+            # Delete from database
+            from database.models import ContentChunk, Content, Crawl
+            session = self.db.session
+            
+            # Delete chunks first (foreign key constraint)
+            logger.info("Deleting content chunks...")
+            chunk_count = session.query(ContentChunk).delete()
+            logger.info(f"Deleted {chunk_count} content chunks")
+            
+            # Delete content items
+            logger.info("Deleting content items...")
+            content_count = session.query(Content).delete()
+            logger.info(f"Deleted {content_count} content items")
+            
+            # Delete crawls
+            logger.info("Deleting crawl records...")
+            crawl_count = session.query(Crawl).delete()
+            logger.info(f"Deleted {crawl_count} crawl records")
+            
+            # Commit the changes
+            session.commit()
+            
+            logger.info("Successfully deleted all crawls and associated content")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete all crawls: {str(e)}")
+            session.rollback()
+            return False

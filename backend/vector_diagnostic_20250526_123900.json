@@ -1,0 +1,47 @@
+{
+  "timestamp": "2025-05-26T12:39:00.865205",
+  "configuration": {
+    "vector_provider": "database",
+    "has_openai_key": true,
+    "has_anthropic_key": false,
+    "postgres_connection": false,
+    "pgvector_installed": false
+  },
+  "database_health": {
+    "error": "No module named 'sqlalchemy'"
+  },
+  "performance_metrics": {
+    "error": "No module named 'sqlalchemy'"
+  },
+  "data_quality": {
+    "error": "No module named 'sqlalchemy'"
+  },
+  "recommendations": [
+    {
+      "priority": "HIGH",
+      "category": "Configuration",
+      "issue": "pgvector extension not installed",
+      "solution": "Install pgvector extension for optimal vector search performance",
+      "command": "sudo -u postgres psql -c \"CREATE EXTENSION IF NOT EXISTS vector;\""
+    },
+    {
+      "priority": "HIGH",
+      "category": "Strategy",
+      "issue": "Using database without pgvector - suboptimal performance",
+      "solution": "Choose between pgvector (local) or Pinecone (cloud) for vector operations",
+      "details": "pgvector: Better for development, lower latency. Pinecone: Better for production, more features."
+    },
+    {
+      "priority": "MEDIUM",
+      "category": "Data Quality",
+      "issue": "Only 0.0% of content has embeddings",
+      "solution": "Process existing content to generate embeddings",
+      "command": "python scripts/process_content_for_rag.py"
+    }
+  ],
+  "next_steps": [
+    "Install pgvector extension in PostgreSQL",
+    "Generate embeddings for existing content",
+    "Choose and implement optimal vector database strategy"
+  ]
+}

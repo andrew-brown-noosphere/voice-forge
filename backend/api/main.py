@@ -9,10 +9,15 @@ import logging
 import uuid
 import os
 
-from api.models import CrawlRequest, CrawlStatus, ContentSearchRequest, ContentResponse
-from api.dependencies import get_crawler_service, get_processor_service, get_db
+from api.models import (
+    CrawlRequest, CrawlStatus, ContentSearchRequest, ContentResponse,
+    ChunkSearchRequest, ChunkResponse, GenerateContentRequest, GeneratedContent,
+    MarketingTemplateCreate, MarketingTemplateResponse, TemplateSearchRequest
+)
+from api.dependencies import get_crawler_service, get_processor_service, get_rag_service, get_db
 from crawler.service import CrawlerService
 from processor.service import ProcessorService
+from processor.rag_service import RAGService
 from database.session import get_db_session
 
 # Configure logging
@@ -25,7 +30,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="VoiceForge API",
     description="API for website crawling and content processing",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 # Add CORS middleware
@@ -43,7 +48,9 @@ app.add_middleware(
 @app.get("/")
 async def root():
     """Root endpoint to check if the API is running."""
-    return {"status": "VoiceForge API is running"}
+    return {"status": "VoiceForge API is running", "version": "0.2.0"}
+
+# Crawl endpoints
 
 @app.post("/crawl", response_model=CrawlStatus, status_code=status.HTTP_202_ACCEPTED)
 async def start_crawl(
@@ -80,6 +87,26 @@ async def start_crawl(
             detail=f"Failed to start crawl: {str(e)}"
         )
 
+@app.delete("/crawl-all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_crawls(
+    background_tasks: BackgroundTasks,
+    crawler_service: CrawlerService = Depends(get_crawler_service),
+):
+    """Delete all crawls and associated content."""
+    try:
+        # Start the deletion process in the background
+        background_tasks.add_task(
+            crawler_service.delete_all_crawls
+        )
+        
+        return None
+    except Exception as e:
+        logger.error(f"Failed to delete all crawls: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete all crawls: {str(e)}"
+        )
+
 @app.get("/crawl/{crawl_id}", response_model=CrawlStatus)
 async def get_crawl_status(
     crawl_id: str,
@@ -87,13 +114,13 @@ async def get_crawl_status(
 ):
     """Get the status of a specific crawl job."""
     try:
-        status = crawler_service.get_crawl_status(crawl_id)
-        if not status:
+        crawl_status = crawler_service.get_crawl_status(crawl_id)
+        if not crawl_status:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Crawl job with ID {crawl_id} not found"
             )
-        return status
+        return crawl_status
     except Exception as e:
         logger.error(f"Failed to get crawl status: {str(e)}")
         raise HTTPException(
@@ -138,6 +165,8 @@ async def list_crawls(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list crawls: {str(e)}"
         )
+
+# Content search endpoints
 
 @app.post("/content/search", response_model=List[ContentResponse])
 async def search_content(
@@ -194,12 +223,186 @@ async def list_domains(
     """List all domains that have been crawled."""
     try:
         domains = db.get_all_domains()
+        
+        # Manually add domains if the list is empty
+        if not domains:
+            domains = ["https://noosphere.tech", "https://www.noosphere.tech"]
+            
         return domains
     except Exception as e:
         logger.error(f"Failed to list domains: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list domains: {str(e)}"
+        )
+
+# New RAG endpoints
+
+@app.post("/rag/chunks/search", response_model=List[ChunkResponse])
+async def search_chunks(
+    request: ChunkSearchRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """
+    Search for content chunks for RAG.
+    
+    This endpoint accepts a search query and returns relevant content chunks
+    that can be used for retrieval-augmented generation.
+    """
+    try:
+        chunks = rag_service.search_chunks(
+            query=request.query,
+            domain=request.domain,
+            content_type=request.content_type,
+            top_k=request.top_k
+        )
+        return chunks
+    except Exception as e:
+        logger.error(f"Failed to search chunks: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search chunks: {str(e)}"
+        )
+
+@app.get("/rag/content/{content_id}/chunks", response_model=List[ChunkResponse])
+async def get_content_chunks(
+    content_id: str,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Get all chunks for a specific content piece."""
+    try:
+        chunks = rag_service.get_content_chunks(content_id)
+        return chunks
+    except Exception as e:
+        logger.error(f"Failed to get content chunks: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get content chunks: {str(e)}"
+        )
+
+@app.post("/rag/process/{content_id}", status_code=status.HTTP_202_ACCEPTED)
+async def process_content_for_rag(
+    content_id: str,
+    background_tasks: BackgroundTasks,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """
+    Process content for RAG.
+    
+    This endpoint initiates a background task to process content into chunks
+    for retrieval-augmented generation.
+    """
+    try:
+        # Start processing in the background
+        background_tasks.add_task(rag_service.process_content_for_rag, content_id)
+        
+        return {"status": "processing", "content_id": content_id}
+    except Exception as e:
+        logger.error(f"Failed to process content for RAG: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process content for RAG: {str(e)}"
+        )
+
+@app.post("/rag/generate", response_model=GeneratedContent)
+async def generate_content(
+    request: GenerateContentRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """
+    Generate content using RAG.
+    
+    This endpoint uses retrieval-augmented generation to create content
+    based on the provided query and parameters.
+    """
+    try:
+        content = rag_service.generate_content(
+            query=request.query,
+            platform=request.platform,
+            tone=request.tone,
+            domain=request.domain,
+            content_type=request.content_type,
+            top_k=request.top_k
+        )
+        return content
+    except Exception as e:
+        logger.error(f"Failed to generate content: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate content: {str(e)}"
+        )
+
+# Template management endpoints
+
+@app.post("/templates", response_model=MarketingTemplateResponse, status_code=status.HTTP_201_CREATED)
+async def create_template(
+    template: MarketingTemplateCreate,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Create a new marketing template."""
+    try:
+        # Convert to dictionary
+        template_data = template.dict()
+        
+        # Store template
+        template_id = rag_service.create_template(template_data)
+        
+        # Get the created template
+        created_template = rag_service.get_template(template_id)
+        
+        return created_template
+    except Exception as e:
+        logger.error(f"Failed to create template: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create template: {str(e)}"
+        )
+
+@app.get("/templates/{template_id}", response_model=MarketingTemplateResponse)
+async def get_template(
+    template_id: str,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Get a specific template by ID."""
+    try:
+        template = rag_service.get_template(template_id)
+        
+        if not template:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Template with ID {template_id} not found"
+            )
+        
+        return template
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get template: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get template: {str(e)}"
+        )
+
+@app.post("/templates/search", response_model=List[MarketingTemplateResponse])
+async def search_templates(
+    request: TemplateSearchRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Search for templates with filters."""
+    try:
+        templates = rag_service.list_templates(
+            platform=request.platform,
+            tone=request.tone,
+            purpose=request.purpose,
+            limit=request.limit,
+            offset=request.offset
+        )
+        return templates
+    except Exception as e:
+        logger.error(f"Failed to search templates: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search templates: {str(e)}"
         )
 
 if __name__ == "__main__":

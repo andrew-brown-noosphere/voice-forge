@@ -1,9 +1,24 @@
 """Alembic configuration for database migrations."""
-
+import sys
+import os
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from alembic import context
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Override sqlalchemy.url with DATABASE_URL from environment
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    config = context.config
+    section = config.config_ini_section
+    config.set_section_option(section, "sqlalchemy.url", database_url)
+
+# Add parent directory to path so we can import from database module
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 # Import Base from models
 from database.models import Base

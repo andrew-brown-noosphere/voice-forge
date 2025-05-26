@@ -6,6 +6,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 // Create axios instance
 const api = axios.create({
   baseURL: API_URL,
+  timeout: 45000, // 45 seconds for AI generation
   headers: {
     'Content-Type': 'application/json',
   },
@@ -34,6 +35,11 @@ const apiService = {
     return response.data
   },
 
+  deleteAllCrawls: async () => {
+    const response = await api.delete('/crawl-all')
+    return response.data
+  },
+
   // Content operations
   searchContent: async (query, domain, contentType, limit = 10, offset = 0) => {
     const params = { query, limit, offset }
@@ -52,6 +58,62 @@ const apiService = {
   // Domain operations
   listDomains: async () => {
     const response = await api.get('/domains')
+    return response.data
+  },
+
+  // NEW: RAG operations
+  searchChunks: async (query, domain, contentType, topK = 5) => {
+    const params = { query, top_k: topK }
+    if (domain) params.domain = domain
+    if (contentType) params.content_type = contentType
+
+    const response = await api.post('/rag/chunks/search', params)
+    return response.data
+  },
+
+  getContentChunks: async (contentId) => {
+    const response = await api.get(`/rag/content/${contentId}/chunks`)
+    return response.data
+  },
+
+  processContentForRag: async (contentId) => {
+    const response = await api.post(`/rag/process/${contentId}`)
+    return response.data
+  },
+
+  generateContent: async (query, platform, tone, domain, contentType, topK = 5) => {
+    const params = { 
+      query, 
+      platform, 
+      tone,
+      top_k: topK
+    }
+    
+    if (domain) params.domain = domain
+    if (contentType) params.content_type = contentType
+
+    const response = await api.post('/rag/generate', params)
+    return response.data
+  },
+
+  // Template operations
+  createTemplate: async (template) => {
+    const response = await api.post('/templates', template)
+    return response.data
+  },
+
+  getTemplate: async (templateId) => {
+    const response = await api.get(`/templates/${templateId}`)
+    return response.data
+  },
+
+  searchTemplates: async (platform, tone, purpose, limit = 10, offset = 0) => {
+    const params = { limit, offset }
+    if (platform) params.platform = platform
+    if (tone) params.tone = tone
+    if (purpose) params.purpose = purpose
+
+    const response = await api.post('/templates/search', params)
     return response.data
   },
 }

@@ -14,7 +14,8 @@ depends_on = None
 
 def upgrade():
     # Create extension for vector operations
-    op.execute('CREATE EXTENSION IF NOT EXISTS vector;')
+    # Note: This needs to be done by a superuser
+    # op.execute('CREATE EXTENSION IF NOT EXISTS vector;')
     
     # Create crawls table
     op.create_table(

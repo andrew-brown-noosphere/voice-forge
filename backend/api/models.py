@@ -37,7 +37,7 @@ class CrawlConfig(BaseModel):
     follow_external_links: bool = Field(False, description="Whether to follow links to external domains")
     exclude_patterns: List[str] = Field(default_factory=list, description="URL patterns to exclude")
     include_patterns: List[str] = Field(default_factory=list, description="URL patterns to include (others will be excluded)")
-    user_agent: str = Field("VoiceForge Crawler (+https://voiceforge.example.com)", description="User agent string")
+    user_agent: str = Field("VoiceForge Intelligencer (+https://voiceforge.voyant.io)", description="User agent string")
 
 class CrawlRequest(BaseModel):
     """Request to start a new crawl job."""
@@ -98,5 +98,108 @@ class ContentSearchRequest(BaseModel):
     query: str = Field(..., description="Search query")
     domain: Optional[str] = Field(None, description="Filter by domain")
     content_type: Optional[ContentType] = Field(None, description="Filter by content type")
+    limit: int = Field(10, ge=1, le=100, description="Maximum number of results")
+    offset: int = Field(0, ge=0, description="Offset for pagination")
+
+# New models for RAG features
+
+class ChunkResponse(BaseModel):
+    """Response model for content chunk retrieval."""
+    id: str = Field(..., description="Unique identifier for the chunk")
+    content_id: str = Field(..., description="ID of the parent content")
+    chunk_index: int = Field(..., description="Index of this chunk in the content")
+    text: str = Field(..., description="Chunk text")
+    start_char: int = Field(..., description="Start position in the original content")
+    end_char: int = Field(..., description="End position in the original content")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Chunk metadata")
+    similarity: Optional[float] = Field(None, description="Similarity score (if this is a search result)")
+
+class ChunkSearchRequest(BaseModel):
+    """Request to search for content chunks."""
+    query: str = Field(..., description="Search query")
+    domain: Optional[str] = Field(None, description="Filter by domain")
+    content_type: Optional[ContentType] = Field(None, description="Filter by content type")
+    top_k: int = Field(5, ge=1, le=50, description="Number of chunks to retrieve")
+
+class ContentTone(str, Enum):
+    """Tones for generated content."""
+    PROFESSIONAL = "professional"
+    CASUAL = "casual"
+    FRIENDLY = "friendly"
+    ENTHUSIASTIC = "enthusiastic"
+    INFORMATIVE = "informative"
+    PERSUASIVE = "persuasive"
+    AUTHORITATIVE = "authoritative"
+
+class ContentPlatform(str, Enum):
+    """Platforms for content generation."""
+    TWITTER = "twitter"
+    INSTAGRAM = "instagram"
+    FACEBOOK = "facebook"
+    LINKEDIN = "linkedin"
+    EMAIL = "email"
+    BLOG = "blog"
+    WEBSITE = "website"
+    CUSTOMER_SUPPORT = "customer_support"
+
+class GenerateContentRequest(BaseModel):
+    """Request to generate content using RAG."""
+    query: str = Field(..., description="Question or topic for content generation")
+    platform: ContentPlatform = Field(..., description="Target platform")
+    tone: ContentTone = Field(..., description="Desired tone")
+    domain: Optional[str] = Field(None, description="Filter by domain")
+    content_type: Optional[ContentType] = Field(None, description="Filter by content type")
+    top_k: int = Field(5, ge=1, le=20, description="Number of chunks to retrieve")
+
+class SourceChunk(BaseModel):
+    """Source chunk information for generated content."""
+    chunk_id: str = Field(..., description="ID of the source chunk")
+    text: str = Field(..., description="Snippet of the chunk text")
+    similarity: float = Field(..., description="Similarity score")
+    content_id: str = Field(..., description="ID of the parent content")
+
+class GeneratedContent(BaseModel):
+    """Response model for generated content."""
+    text: str = Field(..., description="Generated content text")
+    source_chunks: List[SourceChunk] = Field(..., description="Source chunks used for generation")
+    template_id: Optional[str] = Field(None, description="ID of the template used")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Generation metadata")
+
+class TemplateParameter(BaseModel):
+    """Parameter for a marketing template."""
+    name: str = Field(..., description="Parameter name")
+    description: str = Field(..., description="Parameter description")
+    default_value: Optional[str] = Field(None, description="Default value")
+
+class MarketingTemplateCreate(BaseModel):
+    """Request to create a marketing template."""
+    name: str = Field(..., description="Template name")
+    description: Optional[str] = Field(None, description="Template description")
+    template_text: str = Field(..., description="Template text with placeholders")
+    platform: ContentPlatform = Field(..., description="Target platform")
+    tone: ContentTone = Field(..., description="Tone of the template")
+    purpose: str = Field(..., description="Purpose of the template")
+    parameters: List[TemplateParameter] = Field(default_factory=list, description="Template parameters")
+    created_by: Optional[str] = Field(None, description="User who created the template")
+
+class MarketingTemplateResponse(BaseModel):
+    """Response model for marketing template."""
+    id: str = Field(..., description="Template ID")
+    name: str = Field(..., description="Template name")
+    description: Optional[str] = Field(None, description="Template description")
+    template_text: str = Field(..., description="Template text with placeholders")
+    platform: ContentPlatform = Field(..., description="Target platform")
+    tone: ContentTone = Field(..., description="Tone of the template")
+    purpose: str = Field(..., description="Purpose of the template")
+    parameters: List[TemplateParameter] = Field(default_factory=list, description="Template parameters")
+    created_at: datetime = Field(..., description="When the template was created")
+    updated_at: Optional[datetime] = Field(None, description="When the template was last updated")
+    created_by: Optional[str] = Field(None, description="User who created the template")
+
+class TemplateSearchRequest(BaseModel):
+    """Request to search for templates."""
+    platform: Optional[ContentPlatform] = Field(None, description="Filter by platform")
+    tone: Optional[ContentTone] = Field(None, description="Filter by tone")
+    purpose: Optional[str] = Field(None, description="Filter by purpose")
     limit: int = Field(10, ge=1, le=100, description="Maximum number of results")
     offset: int = Field(0, ge=0, description="Offset for pagination")

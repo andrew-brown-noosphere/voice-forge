@@ -4,10 +4,11 @@ Database interface implementation.
 import json
 from typing import List, Dict, Optional, Any
 from datetime import datetime
-from sqlalchemy import desc, func, cast, Float
+from sqlalchemy import desc, func, cast, Float, or_, and_
 from sqlalchemy.dialects.postgresql import ARRAY
+import uuid
 
-from database.models import Crawl, Content
+from database.models import Crawl, Content, ContentChunk, MarketingTemplate
 from api.models import CrawlStatus, CrawlState, CrawlProgress, ContentType, ContentMetadata
 
 class Database:
@@ -196,69 +197,622 @@ class Database:
         Returns:
             List of content dictionaries with relevance scores
         """
-        query = self.session.query(Content)
-        
-        # Apply filters
-        if domain:
-            query = query.filter(Content.domain == domain)
-        
-        if content_type:
-            query = query.filter(Content.content_type == content_type.value)
-        
-        # Filter for processed content with embeddings
-        query = query.filter(Content.is_processed == True)
-        query = query.filter(Content.embedding.isnot(None))
-        
-        # Calculate vector similarity
-        # Note: This requires pgvector extension
-        query_vector = func.array_to_vector(cast(query_embedding, ARRAY(Float)))
-        similarity = func.cosine_similarity(func.vector(Content.embedding), query_vector)
-        
-        # Order by similarity
-        query = query.order_by(desc(similarity))
-        
-        # Apply pagination
-        query = query.limit(limit).offset(offset)
-        
-        # Execute query
-        results = query.all()
-        
-        # Convert to dictionaries with relevance scores
-        content_results = []
-        for content in results:
-            # Calculate cosine similarity (can be done in Python if pgvector is not available)
-            from sklearn.metrics.pairwise import cosine_similarity
-            import numpy as np
+        try:
+            query = self.session.query(Content)
             
-            similarity_score = cosine_similarity(
-                [np.array(query_embedding)],
-                [np.array(content.embedding)]
-            )[0][0]
+            # Apply filters
+            if domain:
+                query = query.filter(Content.domain == domain)
             
-            content_results.append({
-                "content_id": content.id,
-                "url": content.url,
-                "domain": content.domain,
-                "text": content.text,
-                "html": content.html,
-                "metadata": ContentMetadata(
-                    title=content.title,
-                    author=content.author,
-                    publication_date=content.publication_date,
-                    last_modified=content.last_modified,
-                    categories=content.categories,
-                    tags=content.tags,
-                    language=content.language,
-                    content_type=ContentType(content.content_type)
-                ),
-                "relevance_score": float(similarity_score),
-                "crawl_id": content.crawl_id,
-                "extracted_at": content.extracted_at
-            })
-        
-        return content_results
+            if content_type:
+                query = query.filter(Content.content_type == content_type.value)
+            
+            # Get all content regardless of processing status or embeddings
+            # The fallback to Python similarity calculation will handle null embeddings
+            
+            # Add pagination
+            query = query.limit(limit).offset(offset)
+            
+            # Execute query
+            results = query.all()
+            
+            # Calculate similarities in Python
+            content_results = []
+            for content in results:
+                try:
+                    # Calculate similarity if both embeddings exist
+                    if content.embedding and query_embedding:
+                        from sklearn.metrics.pairwise import cosine_similarity
+                        import numpy as np
+                        
+                        similarity_score = cosine_similarity(
+                            [np.array(query_embedding)],
+                            [np.array(content.embedding)]
+                        )[0][0]
+                    else:
+                        similarity_score = 0.0  # Default score for content without embeddings
+                except Exception as e:
+                    print(f"Error calculating similarity: {str(e)}")
+                    similarity_score = 0.0  # Default score on error
+                
+                # Always include the content
+                content_results.append({
+                    "content_id": content.id,
+                    "url": content.url,
+                    "domain": content.domain,
+                    "text": content.text,
+                    "html": content.html,
+                    "metadata": ContentMetadata(
+                        title=content.title,
+                        author=content.author,
+                        publication_date=content.publication_date,
+                        last_modified=content.last_modified,
+                        categories=content.categories,
+                        tags=content.tags,
+                        language=content.language,
+                        content_type=ContentType(content.content_type)
+                    ),
+                    "relevance_score": float(similarity_score),
+                    "crawl_id": content.crawl_id,
+                    "extracted_at": content.extracted_at
+                })
+            
+            return content_results
+        except Exception as e:
+            print(f"Error in content search: {str(e)}")
+            # Log the error but return an empty list to avoid breaking the UI
+            return []
     
     def get_all_domains(self) -> List[str]:
         """Get all domains that have been crawled."""
         domains = self.session.query(Content.domain).distinct().all()
-        return [domain[0] for domain in domains]
+        domain_list = [domain[0] for domain in domains]
+        print(f"Domains found in database: {domain_list}")
+        return domain_list
+    
+    # New RAG-specific methods
+    
+    def store_content_chunks(self, chunks: List[Dict[str, Any]]):
+        """
+        Store content chunks in the database.
+        
+        Args:
+            chunks: List of chunk dictionaries
+        """
+        chunk_objects = []
+        for chunk in chunks:
+            chunk_object = ContentChunk(
+                id=chunk["id"],
+                content_id=chunk["content_id"],
+                chunk_index=chunk["chunk_index"],
+                text=chunk["text"],
+                start_char=chunk["start_char"],
+                end_char=chunk["end_char"],
+                embedding=chunk.get("embedding"),
+                chunk_metadata=chunk.get("chunk_metadata", {})
+            )
+            chunk_objects.append(chunk_object)
+        
+        self.session.add_all(chunk_objects)
+        self.session.commit()
+    
+    def search_chunks_by_vector(
+        self,
+        query_embedding: List[float],
+        top_k: int = 5,
+        domain: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for content chunks using vector similarity.
+        
+        Args:
+            query_embedding: The query embedding vector
+            top_k: Maximum number of results
+            domain: Filter by domain
+            content_type: Filter by content type
+            
+        Returns:
+            List of chunk dictionaries with similarity scores
+        """
+        query = self.session.query(ContentChunk)
+        
+        # Apply filters through joins
+        if domain or content_type:
+            query = query.join(Content, ContentChunk.content_id == Content.id)
+            
+            if domain:
+                query = query.filter(Content.domain == domain)
+            
+            if content_type:
+                query = query.filter(Content.content_type == content_type)
+        
+        # Calculate vector similarity
+        # Note: This requires pgvector extension
+        try:
+            # First check if vector extension is available - use a new session to avoid transaction issues
+            try:
+                from sqlalchemy.sql.expression import text
+                extension_check = self.session.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).fetchone()
+            except Exception as e:
+                print(f"Error checking vector extension for chunks: {str(e)}")
+                self.session.rollback()  # Rollback the transaction on error
+                extension_check = None
+            
+            if extension_check:
+                # Use the <=> operator for cosine distance (smaller is more similar)
+                # Create a temporary embedding as a bound parameter first
+                
+                # Convert the query to a raw SQL string where we pass the embedding directly
+                # Format the embedding for direct SQL inclusion
+                embed_str = str(query_embedding).replace('[', '{').replace(']', '}')
+                
+                # Use direct SQL with the embedding as a literal
+                try:
+                    query = query.order_by(text(f"-(content_chunks.embedding::vector(768) <=> '{embed_str}'::vector(768))::float DESC"))
+                except Exception as inner_e:
+                    print(f"Error applying vector order for chunks: {str(inner_e)}")
+                    self.session.rollback()  # Rollback the transaction on error
+            else:
+                print("Vector extension not available for chunks, falling back to Python-based similarity")
+                # No sorting in the database, we'll do it in Python
+                # Limit the query to a reasonable number to avoid loading too much data
+                query = query.limit(100)  # Set a reasonable limit
+        except Exception as e:
+            print(f"Vector search fallback for chunks due to: {str(e)}")
+            self.session.rollback()  # Rollback the transaction on error
+            # Fallback to fetching all chunks and sorting in Python if the query fails
+            # Limit the query to a reasonable number to avoid loading too much data
+            query = query.limit(100)  # Set a reasonable limit
+        
+        # Limit results
+        query = query.limit(top_k)
+        
+        # Execute query
+        results = query.all()
+        
+        # Convert to dictionaries with similarity scores
+        chunk_results = []
+        for chunk in results:
+            # Calculate cosine similarity
+            try:
+                from sklearn.metrics.pairwise import cosine_similarity
+                import numpy as np
+                
+                if chunk.embedding and query_embedding:
+                    similarity_score = cosine_similarity(
+                        [np.array(query_embedding)],
+                        [np.array(chunk.embedding)]
+                    )[0][0]
+                else:
+                    similarity_score = 0.0  # Default score if embeddings are missing
+                
+                chunk_results.append({
+                    "id": chunk.id,
+                    "content_id": chunk.content_id,
+                    "chunk_index": chunk.chunk_index,
+                    "text": chunk.text,
+                    "start_char": chunk.start_char,
+                    "end_char": chunk.end_char,
+                    "metadata": chunk.chunk_metadata,
+                    "similarity": float(similarity_score)
+                })
+            except Exception as e:
+                print(f"Error calculating chunk similarity: {str(e)}")
+                # Still include the chunk, just without a similarity score
+                chunk_results.append({
+                    "id": chunk.id,
+                    "content_id": chunk.content_id,
+                    "chunk_index": chunk.chunk_index,
+                    "text": chunk.text,
+                    "start_char": chunk.start_char,
+                    "end_char": chunk.end_char,
+                    "metadata": chunk.chunk_metadata,
+                    "similarity": 0.0  # Default score
+                })
+        
+        return chunk_results
+    
+    def search_chunks_by_text(
+        self,
+        query: str,
+        top_k: int = 5,
+        domain: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for content chunks using basic text search.
+        This is a fallback for when vector search is not working.
+        
+        Args:
+            query: The search query text
+            top_k: Maximum number of results
+            domain: Filter by domain
+            content_type: Filter by content type
+            
+        Returns:
+            List of chunk dictionaries with similarity scores
+        """
+        try:
+            from sqlalchemy.sql.expression import text as sql_text
+            from sqlalchemy import or_, func, desc
+            
+            # Prepare the search query
+            search_terms = [term.strip() for term in query.split() if term.strip()]
+            
+            # Build base query
+            query_obj = self.session.query(ContentChunk)
+            
+            # Apply filters through joins
+            if domain or content_type:
+                query_obj = query_obj.join(Content, ContentChunk.content_id == Content.id)
+                
+                if domain:
+                    query_obj = query_obj.filter(Content.domain == domain)
+                
+                if content_type:
+                    query_obj = query_obj.filter(Content.content_type == content_type)
+            
+            # Add text search conditions if PostgreSQL full-text search is available
+            try:
+                # Try to use PostgreSQL full-text search
+                conditions = []
+                for term in search_terms:
+                    # Add condition for text column, using ILIKE for case-insensitive search
+                    conditions.append(ContentChunk.text.ilike(f'%{term}%'))
+                
+                if conditions:
+                    query_obj = query_obj.filter(or_(*conditions))
+                
+                # Add scoring using a complex case statement in SQL
+                score_expr = ""
+                for i, term in enumerate(search_terms):
+                    score_expr += f"CASE WHEN text ILIKE '%{term}%' THEN 1 ELSE 0 END + "
+                
+                if score_expr:
+                    score_expr = score_expr[:-3]  # Remove the trailing ' + '
+                    # Order by the score in descending order
+                    query_obj = query_obj.order_by(sql_text(f"({score_expr}) DESC"))
+                
+            except Exception as e:
+                print(f"Error applying full-text search: {str(e)}")
+                # Fallback to simple filtering without ordering
+                # Reset query
+                query_obj = self.session.query(ContentChunk)
+                
+                # Apply filters through joins
+                if domain or content_type:
+                    query_obj = query_obj.join(Content, ContentChunk.content_id == Content.id)
+                    
+                    if domain:
+                        query_obj = query_obj.filter(Content.domain == domain)
+                    
+                    if content_type:
+                        query_obj = query_obj.filter(Content.content_type == content_type)
+                
+                # Simple LIKE search without ordering
+                conditions = []
+                for term in search_terms:
+                    conditions.append(ContentChunk.text.ilike(f'%{term}%'))
+                
+                if conditions:
+                    query_obj = query_obj.filter(or_(*conditions))
+            
+            # Limit results
+            query_obj = query_obj.limit(top_k)
+            
+            # Execute query
+            results = query_obj.all()
+            
+            # Convert to dictionaries with fake similarity scores
+            chunk_results = []
+            
+            for chunk in results:
+                # Calculate a simple term frequency score
+                score = 0.0
+                if search_terms:
+                    term_count = 0
+                    for term in search_terms:
+                        term_count += chunk.text.lower().count(term.lower())
+                    score = min(1.0, term_count / len(search_terms))  # Normalize to [0, 1]
+                
+                chunk_results.append({
+                    "id": chunk.id,
+                    "content_id": chunk.content_id,
+                    "chunk_index": chunk.chunk_index,
+                    "text": chunk.text,
+                    "start_char": chunk.start_char,
+                    "end_char": chunk.end_char,
+                    "metadata": chunk.chunk_metadata,
+                    "similarity": score
+                })
+            
+            return chunk_results
+            
+        except Exception as e:
+            print(f"Error in text search for chunks: {str(e)}")
+            # Return an empty list as fallback
+            return []
+    
+    def check_content_exists(
+        self,
+        domain: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> bool:
+        """
+        Check if any content exists with the given filters.
+        
+        Args:
+            domain: Filter by domain
+            content_type: Filter by content type
+            
+        Returns:
+            True if content exists, False otherwise
+        """
+        try:
+            query = self.session.query(Content)
+            
+            if domain:
+                query = query.filter(Content.domain == domain)
+            
+            if content_type:
+                query = query.filter(Content.content_type == content_type)
+            
+            # Just check if any content exists
+            return self.session.query(query.exists()).scalar()
+        except Exception as e:
+            print(f"Error checking if content exists: {str(e)}")
+            return False
+    
+    def get_content_chunks(self, content_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all chunks for a specific content.
+        
+        Args:
+            content_id: Content ID
+            
+        Returns:
+            List of chunk dictionaries
+        """
+        chunks = self.session.query(ContentChunk) \
+            .filter(ContentChunk.content_id == content_id) \
+            .order_by(ContentChunk.chunk_index) \
+            .all()
+        
+        return [
+            {
+                "id": chunk.id,
+                "content_id": chunk.content_id,
+                "chunk_index": chunk.chunk_index,
+                "text": chunk.text,
+                "start_char": chunk.start_char,
+                "end_char": chunk.end_char,
+                "metadata": chunk.chunk_metadata
+            }
+            for chunk in chunks
+        ]
+    
+    def search_chunks_by_text(
+        self,
+        query: str,
+        top_k: int = 5,
+        domain: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for content chunks using text search.
+        This is a fallback for when vector search doesn't work.
+        
+        Args:
+            query: The search query text
+            top_k: Maximum number of results
+            domain: Filter by domain
+            content_type: Filter by content type
+            
+        Returns:
+            List of chunk dictionaries with similarity scores
+        """
+        try:
+            # Prepare the search query
+            search_terms = [term.strip().lower() for term in query.split() if term.strip()]
+            
+            # Build base query
+            query_obj = self.session.query(ContentChunk)
+            
+            # Apply filters through joins if needed
+            if domain or content_type:
+                query_obj = query_obj.join(Content, ContentChunk.content_id == Content.id)
+                
+                if domain:
+                    query_obj = query_obj.filter(Content.domain == domain)
+                
+                if content_type:
+                    query_obj = query_obj.filter(Content.content_type == content_type)
+            
+            # Add text search conditions
+            if search_terms:
+                from sqlalchemy import or_
+                conditions = []
+                for term in search_terms:
+                    # Add condition for text column with ILIKE (case-insensitive)
+                    conditions.append(ContentChunk.text.ilike(f'%{term}%'))
+                
+                if conditions:
+                    query_obj = query_obj.filter(or_(*conditions))
+            
+            # Limit results
+            results = query_obj.limit(top_k*2).all()  # Get more than needed to score and filter
+            
+            # Convert to dictionaries with calculated similarity scores
+            chunk_results = []
+            
+            for chunk in results:
+                # Calculate a score based on number of terms found in text
+                score = 0.0
+                if search_terms:
+                    chunk_text = chunk.text.lower()
+                    term_count = 0
+                    
+                    for term in search_terms:
+                        if term in chunk_text:
+                            term_count += 1
+                    
+                    # Score based on percentage of terms found
+                    score = min(1.0, term_count / len(search_terms))  # Normalize to [0, 1]
+                
+                # Only add if score is positive (some term was found)
+                if score > 0:
+                    chunk_results.append({
+                        "id": chunk.id,
+                        "content_id": chunk.content_id,
+                        "chunk_index": chunk.chunk_index,
+                        "text": chunk.text,
+                        "start_char": chunk.start_char,
+                        "end_char": chunk.end_char,
+                        "metadata": chunk.chunk_metadata,
+                        "similarity": score
+                    })
+            
+            # Sort by score and limit to top_k
+            chunk_results.sort(key=lambda x: x["similarity"], reverse=True)
+            return chunk_results[:top_k]
+            
+        except Exception as e:
+            print(f"Error in text search for chunks: {str(e)}")
+            # Return an empty list as fallback
+            return []
+    
+    def store_template(self, template_data: Dict[str, Any]) -> str:
+        """
+        Store a marketing template in the database.
+        
+        Args:
+            template_data: Template data
+            
+        Returns:
+            Template ID
+        """
+        template_id = template_data.get("id", str(uuid.uuid4()))
+        
+        template = MarketingTemplate(
+            id=template_id,
+            name=template_data["name"],
+            description=template_data.get("description"),
+            template_text=template_data["template_text"],
+            platform=template_data["platform"],
+            tone=template_data["tone"],
+            purpose=template_data["purpose"],
+            parameters=template_data.get("parameters", []),
+            created_at=datetime.utcnow(),
+            created_by=template_data.get("created_by")
+        )
+        
+        self.session.add(template)
+        self.session.commit()
+        
+        return template_id
+    
+    def get_template(
+        self,
+        template_id: Optional[str] = None,
+        platform: Optional[str] = None,
+        tone: Optional[str] = None,
+        purpose: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a marketing template.
+        
+        Args:
+            template_id: Optional template ID
+            platform: Optional platform filter
+            tone: Optional tone filter
+            purpose: Optional purpose filter
+            
+        Returns:
+            Template dictionary or None if not found
+        """
+        query = self.session.query(MarketingTemplate)
+        
+        if template_id:
+            query = query.filter(MarketingTemplate.id == template_id)
+        else:
+            # Apply filters
+            if platform:
+                query = query.filter(MarketingTemplate.platform == platform)
+            
+            if tone:
+                query = query.filter(MarketingTemplate.tone == tone)
+            
+            if purpose:
+                query = query.filter(MarketingTemplate.purpose == purpose)
+        
+        template = query.first()
+        
+        if not template:
+            return None
+        
+        return {
+            "id": template.id,
+            "name": template.name,
+            "description": template.description,
+            "template_text": template.template_text,
+            "platform": template.platform,
+            "tone": template.tone,
+            "purpose": template.purpose,
+            "parameters": template.parameters,
+            "created_at": template.created_at,
+            "updated_at": template.updated_at,
+            "created_by": template.created_by
+        }
+    
+    def list_templates(
+        self,
+        platform: Optional[str] = None,
+        tone: Optional[str] = None,
+        purpose: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        List marketing templates with filters.
+        
+        Args:
+            platform: Optional platform filter
+            tone: Optional tone filter
+            purpose: Optional purpose filter
+            limit: Maximum number of results
+            offset: Offset for pagination
+            
+        Returns:
+            List of template dictionaries
+        """
+        query = self.session.query(MarketingTemplate)
+        
+        # Apply filters
+        if platform:
+            query = query.filter(MarketingTemplate.platform == platform)
+        
+        if tone:
+            query = query.filter(MarketingTemplate.tone == tone)
+        
+        if purpose:
+            query = query.filter(MarketingTemplate.purpose == purpose)
+        
+        templates = query.order_by(desc(MarketingTemplate.created_at)).limit(limit).offset(offset).all()
+        
+        return [
+            {
+                "id": template.id,
+                "name": template.name,
+                "description": template.description,
+                "template_text": template.template_text,
+                "platform": template.platform,
+                "tone": template.tone,
+                "purpose": template.purpose,
+                "parameters": template.parameters,
+                "created_at": template.created_at,
+                "updated_at": template.updated_at,
+                "created_by": template.created_by
+            }
+            for template in templates
+        ]

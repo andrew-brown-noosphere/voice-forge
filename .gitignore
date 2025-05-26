@@ -79,3 +79,6 @@ ipython_config.py
 .python-version
 .env.test
 .docker/
+
+# API keys and sensitive files
+vf-api.txt

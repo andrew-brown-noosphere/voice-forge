@@ -4,7 +4,7 @@ VoiceForge is a website crawling and content processing system designed to analy
 
 ## Overview
 
-VoiceForge analyzes company websites to extract and process content, which can then be used to train language models that generate content matching the company's voice and brand. The system is built with a Python backend and React frontend.
+VoiceForge analyzes company websites to extract and process content, which can then be used with Retrieval-Augmented Generation (RAG) to generate content matching the company's voice and brand. The system is built with a Python backend and React frontend.
 
 This project is structured as a full-stack application with the following components:
 
@@ -12,11 +12,15 @@ This project is structured as a full-stack application with the following compon
 - **Website Crawler Infrastructure**: A robust crawler that can recursively scan websites, respecting robots.txt and implementing rate limiting
 - **Content Extraction & Processing**: Intelligent extraction of meaningful content from websites
 - **Content Database**: Efficient storage of crawled website content
-- **Relevance Scoring System**: Text analysis to identify key topics and terms
+- **Vector Embedding & Similarity Search**: Advanced semantic search capabilities using embeddings
+- **Retrieval-Augmented Generation (RAG)**: Generate brand-aligned content using retrieved context
+- **Multi-Platform Content Templates**: Pre-configured templates for different social platforms and tones
 
 ### Frontend Features
 - **Admin Dashboard**: Monitor and manage crawl jobs
 - **Content Search**: Search and view extracted content
+- **Content Generation**: Generate brand-aligned content for different platforms
+- **Template Management**: Create and edit marketing templates
 - **Configuration Interface**: Customize crawler settings
 
 ## Tech Stack
@@ -27,6 +31,7 @@ This project is structured as a full-stack application with the following compon
 - **Database**: PostgreSQL with pgvector extension
 - **Web Scraping**: Playwright for JavaScript rendering
 - **NLP**: SpaCy, scikit-learn, sentence-transformers
+- **RAG**: Custom implementation with embedding retrieval and templating
 - **Container**: Docker
 
 ### Frontend
@@ -95,7 +100,12 @@ This project is structured as a full-stack application with the following compon
    alembic upgrade head
    ```
 
-7. Start the API server
+7. Create initial marketing templates
+   ```bash
+   python scripts/create_templates.py
+   ```
+
+8. Start the API server
    ```bash
    uvicorn api.main:app --reload
    ```
@@ -122,6 +132,29 @@ This project is structured as a full-stack application with the following compon
 2. Go to the "New Crawl" page and enter a domain URL to start crawling
 3. Monitor the crawl progress on the dashboard
 4. Once content is extracted, use the Content Search page to explore and analyze the content
+5. Process content for RAG using the API or scripts
+6. Generate brand-aligned content using the RAG system with different templates and tones
+
+## RAG System
+
+The VoiceForge RAG system provides the following capabilities:
+
+1. **Content Chunking**: Split content into semantic chunks for more precise retrieval
+2. **Vector Embedding**: Generate embeddings for content using state-of-the-art models
+3. **Semantic Search**: Retrieve the most relevant content chunks based on query similarity
+4. **Template-based Generation**: Generate content using retrieved context and platform-specific templates
+5. **Multi-platform Support**: Generate content for different platforms (Twitter, LinkedIn, Email, Instagram, etc.)
+6. **Tone Customization**: Choose from various tones (professional, casual, enthusiastic, etc.)
+
+### RAG API Endpoints
+
+- **POST /rag/chunks/search**: Search for relevant content chunks
+- **GET /rag/content/{content_id}/chunks**: Get all chunks for a specific content piece
+- **POST /rag/process/{content_id}**: Process content for RAG
+- **POST /rag/generate**: Generate content using RAG
+- **POST /templates**: Create a new marketing template
+- **GET /templates/{template_id}**: Get a specific template by ID
+- **POST /templates/search**: Search for templates with filters
 
 ## Project Structure
 
@@ -131,7 +164,11 @@ voice-forge/
 │   ├── api/                     # API endpoints and models
 │   ├── crawler/                 # Website crawler implementation
 │   ├── processor/               # Content processing and analysis
+│   │   ├── chunker.py           # Content chunking for RAG
+│   │   ├── rag.py               # RAG system implementation
+│   │   └── rag_service.py       # RAG service layer
 │   ├── database/                # Database models and access
+│   ├── scripts/                 # Utility scripts
 │   ├── requirements.txt         # Python dependencies
 │   └── Dockerfile               # Backend Docker configuration
 ├── frontend/                    # React frontend application
@@ -147,10 +184,11 @@ voice-forge/
 ```
 
 ## Future Development
-- Integration with language models for content generation
-- Advanced analytics and reporting
-- Extensible plugin system for custom content processors
-- Integration with content management systems
+- Advanced scoring and ranking for retrieved content
+- Integration with commercial language models for enhanced generation
+- Multi-lingual support for content processing and generation
+- A/B testing of different content versions
+- Content performance analytics and reporting
 
 ## License
 This project is proprietary and not licensed for public use.
