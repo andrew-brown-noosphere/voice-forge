@@ -28,7 +28,7 @@ import SpeedIcon from '@mui/icons-material/Speed'
 import SettingsIcon from '@mui/icons-material/Settings'
 
 // API service
-import apiService from '../services/api'
+import { useApi } from '../hooks/useApi'
 
 const NewCrawl = () => {
   const navigate = useNavigate()
@@ -37,18 +37,39 @@ const NewCrawl = () => {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   
+  // Use the new authenticated API
+  const api = useApi()
+  
   // Form data
   const [domain, setDomain] = useState('')
   const [config, setConfig] = useState({
     max_depth: 3,
-    max_pages: 100,
+    max_pages: 20,  // 🎯 Reduced for focused crawling
     respect_robots_txt: true,
-    delay: 1.0,
-    timeout: 30,
+    delay: 2.0,     // 🎯 Increased to 2 seconds to avoid blocking
+    timeout: 15,    // 🎯 Reduced from 30 to 15 seconds
     follow_external_links: false,
-    exclude_patterns: [],
-    include_patterns: [],
-    user_agent: 'VoiceForge Crawler (+https://voiceforge.example.com)',
+    exclude_patterns: [
+      '.*/contact.*',     // 🎯 Skip contact pages (slow)
+      '.*/login.*',       // 🎯 Skip login pages
+      '.*/register.*',    // 🎯 Skip registration
+      '.*/checkout.*',    // 🎯 Skip checkout flows
+      '.*/cart.*',        // 🎯 Skip shopping cart
+      '.*/admin.*',       // 🎯 Skip admin areas
+      '.*\\.pdf$',        // 🎯 Skip PDF files
+      '.*\\.jpg$',        // 🎯 Skip images
+      '.*\\.png$',
+      '.*\\.css$',        // 🎯 Skip stylesheets
+      '.*\\.js$',         // 🎯 Skip JavaScript files
+    ],
+    include_patterns: [
+      '.*/product/?$',    // 🎯 Include /product page
+      '.*/product/.*',    // 🎯 Include /product/* subpages
+      '.*/blog/?$',       // 🎯 Include /blog page
+      '.*/blog/.*',       // 🎯 Include /blog/* subpages
+    ],
+    // 🎯 FIXED: Realistic browser User-Agent instead of crawler signature
+    user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   })
   
   // Exclude patterns
@@ -138,7 +159,10 @@ const NewCrawl = () => {
     setError('')
     
     try {
-      const response = await apiService.createCrawl(domain, config)
+      const response = await api.crawls.create({
+        domain: domain,
+        config: config
+      })
       setSuccess(true)
       
       // Redirect to crawl details page after 2 seconds

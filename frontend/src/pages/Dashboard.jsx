@@ -1,18 +1,13 @@
-import React, { useEffect, useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
 import {
   Box,
   Typography,
   Grid,
-  Paper,
-  Button,
   Card,
   CardContent,
-  CardHeader,
-  Divider,
-  List,
-  ListItem,
-  ListItemText,
+  Button,
+  Alert,
+  CircularProgress,
   Chip,
   LinearProgress,
   Table,
@@ -21,275 +16,448 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Paper,
+  IconButton,
+  Tooltip,
+  Switch,
+  FormControlLabel
 } from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
-import LanguageIcon from '@mui/icons-material/Language'
-import ScheduleIcon from '@mui/icons-material/Schedule'
-import { format } from 'date-fns'
-
-// API service
-import apiService from '../services/api'
-
-// Chart components
-import { Doughnut } from 'react-chartjs-2'
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
-
-// Register Chart.js components
-ChartJS.register(ArcElement, Tooltip, Legend)
+import {
+  Add as AddIcon,
+  Refresh as RefreshIcon,
+  Launch as LaunchIcon,
+  Delete as DeleteIcon,
+  PlayArrow as PlayIcon,
+  Analytics as AnalyticsIcon
+} from '@mui/icons-material'
+import { useNavigate } from 'react-router-dom'
+import { useApi } from '../hooks/useApi'
+import AnalyticsDashboard from '../components/AnalyticsDashboard'
 
 const Dashboard = () => {
-  const [crawls, setCrawls] = useState([])
+  const navigate = useNavigate()
+  const api = useApi()
+  
+  // State management
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [crawls, setCrawls] = useState([])
+  const [domains, setDomains] = useState([])
+  const [showAnalytics, setShowAnalytics] = useState(false)
   const [stats, setStats] = useState({
     totalCrawls: 0,
-    totalPages: 0,
-    totalContent: 0,
     activeCrawls: 0,
+    completedCrawls: 0,
+    totalDomains: 0
   })
 
+  // Load dashboard data
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Load recent crawls and domains in parallel
+      const [crawlsData, domainsData] = await Promise.all([
+        api.crawls.list(10, 0), // Get last 10 crawls
+        api.domains.list()
+      ])
+
+      setCrawls(crawlsData)
+      setDomains(domainsData)
+
+      // Calculate stats
+      const activeCrawls = crawlsData.filter(crawl => 
+        ['running', 'pending', 'processing'].includes(crawl.state)
+      ).length
+      
+      const completedCrawls = crawlsData.filter(crawl => 
+        crawl.state === 'completed'
+      ).length
+
+      setStats({
+        totalCrawls: crawlsData.length,
+        activeCrawls,
+        completedCrawls,
+        totalDomains: domainsData.length
+      })
+
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err)
+      // Only show error if it's not a "no organization" error (which is handled by OrganizationGate)
+      if (!err.message.includes('no organization')) {
+        setError(`Failed to load dashboard: ${err.message}`)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load data on component mount
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const crawlsData = await apiService.listCrawls(5, 0)
-        setCrawls(crawlsData)
-        
-        // Calculate stats
-        const activeCrawls = crawlsData.filter(
-          (crawl) => crawl.state === 'running' || crawl.state === 'pending'
-        ).length
-        
-        const totalPages = crawlsData.reduce(
-          (total, crawl) => total + crawl.progress.pages_crawled,
-          0
-        )
-        
-        const totalContent = crawlsData.reduce(
-          (total, crawl) => total + crawl.progress.content_extracted,
-          0
-        )
-        
-        setStats({
-          totalCrawls: crawlsData.length,
-          totalPages,
-          totalContent,
-          activeCrawls,
-        })
-        
-        setLoading(false)
-      } catch (error) {
-        console.error('Failed to fetch dashboard data', error)
-        setLoading(false)
+    // Only load data once when component mounts
+    let isMounted = true
+    
+    const loadData = async () => {
+      if (isMounted) {
+        await loadDashboardData()
       }
     }
-
-    fetchData()
     
-    // Poll for updates every 5 seconds
-    const interval = setInterval(fetchData, 5000)
+    loadData()
     
-    return () => clearInterval(interval)
-  }, [])
+    // Cleanup function
+    return () => {
+      isMounted = false
+    }
+  }, []) // Empty dependency array - only run once
 
-  // Prepare chart data
-  const chartData = {
-    labels: ['Completed', 'Running', 'Failed', 'Cancelled'],
-    datasets: [
-      {
-        data: [
-          crawls.filter((crawl) => crawl.state === 'completed').length,
-          crawls.filter((crawl) => crawl.state === 'running').length,
-          crawls.filter((crawl) => crawl.state === 'failed').length,
-          crawls.filter((crawl) => crawl.state === 'cancelled').length,
-        ],
-        backgroundColor: ['#4caf50', '#2196f3', '#f44336', '#ff9800'],
-        hoverBackgroundColor: ['#388e3c', '#1976d2', '#d32f2f', '#f57c00'],
-      },
-    ],
+  // Handle crawl deletion
+  const handleDeleteCrawl = async (crawlId) => {
+    try {
+      // Show visual feedback during deletion
+      const crawlIndex = crawls.findIndex(c => c.crawl_id === crawlId)
+      if (crawlIndex !== -1) {
+        // Temporarily mark as deleting
+        const updatedCrawls = [...crawls]
+        updatedCrawls[crawlIndex] = { ...updatedCrawls[crawlIndex], deleting: true }
+        setCrawls(updatedCrawls)
+      }
+      
+      await api.crawls.delete(crawlId) // Use the explicit delete method
+      
+      // Refresh data after deletion with a small delay
+      setTimeout(async () => {
+        try {
+          await loadDashboardData()
+        } catch (refreshErr) {
+          console.error('Failed to refresh after deletion:', refreshErr)
+          // If refresh fails, at least remove the deleted item locally
+          setCrawls(prevCrawls => prevCrawls.filter(c => c.crawl_id !== crawlId))
+        }
+      }, 200)
+      
+    } catch (err) {
+      console.error('Delete crawl error:', err)
+      setError(`Failed to delete crawl: ${err.message}`)
+      
+      // Reset the deleting state on error
+      setCrawls(prevCrawls => 
+        prevCrawls.map(c => c.crawl_id === crawlId ? { ...c, deleting: false } : c)
+      )
+    }
   }
 
-  // Chart options
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'bottom',
-      },
-    },
-  }
-
-  // Get status chip color
+  // Get status color for chips
   const getStatusColor = (status) => {
     switch (status) {
-      case 'running':
-        return 'primary'
       case 'completed':
         return 'success'
-      case 'failed':
-        return 'error'
-      case 'cancelled':
+      case 'running':
+      case 'processing':
+        return 'primary'
+      case 'pending':
         return 'warning'
+      case 'failed':
+      case 'cancelled':
+        return 'error'
       default:
         return 'default'
     }
   }
 
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A'
+    return new Date(dateString).toLocaleString()
+  }
+
+  if (loading) {
+    return (
+      <Box sx={{ p: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+        <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading dashboard...</Typography>
+      </Box>
+    )
+  }
+
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1" gutterBottom>
+    <Box sx={{ p: 4 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Typography variant="h4" component="h1">
           Dashboard
         </Typography>
-        <Button
-          component={RouterLink}
-          to="/crawls/new"
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-        >
-          New Crawl
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<AnalyticsIcon />}
+            onClick={() => setShowAnalytics(!showAnalytics)}
+          >
+            {showAnalytics ? 'Hide Analytics' : 'Show Analytics'}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={loadDashboardData}
+            disabled={loading}
+          >
+            Refresh
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => navigate('/crawls/new')}
+          >
+            New Crawl
+          </Button>
+        </Box>
       </Box>
 
-      {/* Stats Cards */}
-      <Grid container spacing={3} mb={4}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
-            <Typography variant="h6" color="textSecondary" gutterBottom>
-              Total Crawls
-            </Typography>
-            <Typography variant="h3">{stats.totalCrawls}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
-            <Typography variant="h6" color="textSecondary" gutterBottom>
-              Active Crawls
-            </Typography>
-            <Typography variant="h3">{stats.activeCrawls}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
-            <Typography variant="h6" color="textSecondary" gutterBottom>
-              Pages Crawled
-            </Typography>
-            <Typography variant="h3">{stats.totalPages}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
-            <Typography variant="h6" color="textSecondary" gutterBottom>
-              Content Extracted
-            </Typography>
-            <Typography variant="h3">{stats.totalContent}</Typography>
-          </Paper>
-        </Grid>
-      </Grid>
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
 
-      <Grid container spacing={3}>
-        {/* Recent Crawls */}
-        <Grid item xs={12} md={8}>
+      {/* Analytics Dashboard */}
+      {showAnalytics && (
+        <Box sx={{ mb: 4 }}>
+          <AnalyticsDashboard key="analytics-dashboard" />
+        </Box>
+      )}
+
+      {/* Stats Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
           <Card>
-            <CardHeader title="Recent Crawls" />
-            <Divider />
-            <CardContent sx={{ p: 0 }}>
-              {loading ? (
-                <LinearProgress />
-              ) : (
-                <TableContainer>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Domain</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell>Progress</TableCell>
-                        <TableCell>Start Time</TableCell>
-                        <TableCell>Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {crawls.map((crawl) => (
-                        <TableRow key={crawl.crawl_id}>
-                          <TableCell>
-                            <Box display="flex" alignItems="center">
-                              <LanguageIcon fontSize="small" sx={{ mr: 1 }} />
-                              {crawl.domain}
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={crawl.state.charAt(0).toUpperCase() + crawl.state.slice(1)}
-                              color={getStatusColor(crawl.state)}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {crawl.state === 'running' ? (
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Box sx={{ width: '100%', mr: 1 }}>
-                                  <LinearProgress
-                                    variant="determinate"
-                                    value={Math.min(
-                                      (crawl.progress.pages_crawled / Math.max(1, crawl.progress.pages_discovered)) * 100,
-                                      100
-                                    )}
-                                  />
-                                </Box>
-                                <Box sx={{ minWidth: 35 }}>
-                                  <Typography variant="body2" color="text.secondary">
-                                    {`${crawl.progress.pages_crawled}/${crawl.progress.pages_discovered}`}
-                                  </Typography>
-                                </Box>
-                              </Box>
-                            ) : (
-                              `${crawl.progress.pages_crawled} pages`
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Box display="flex" alignItems="center">
-                              <ScheduleIcon fontSize="small" sx={{ mr: 1 }} />
-                              {crawl.start_time
-                                ? format(new Date(crawl.start_time), 'MMM d, yyyy HH:mm')
-                                : 'N/A'}
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              component={RouterLink}
-                              to={`/crawls/${crawl.crawl_id}`}
-                              size="small"
-                            >
-                              Details
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Total Crawls
+              </Typography>
+              <Typography variant="h4">
+                {stats.totalCrawls}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
-
-        {/* Crawl Status Chart */}
-        <Grid item xs={12} md={4}>
-          <Card sx={{ height: '100%' }}>
-            <CardHeader title="Crawl Status" />
-            <Divider />
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
             <CardContent>
-              <Box sx={{ height: 250, position: 'relative' }}>
-                {loading ? (
-                  <LinearProgress />
-                ) : (
-                  <Doughnut data={chartData} options={chartOptions} />
-                )}
+              <Typography color="textSecondary" gutterBottom>
+                Active Crawls
+              </Typography>
+              <Typography variant="h4" color="primary">
+                {stats.activeCrawls}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Completed
+              </Typography>
+              <Typography variant="h4" color="success.main">
+                {stats.completedCrawls}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Domains
+              </Typography>
+              <Typography variant="h4">
+                {stats.totalDomains}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Quick Actions */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Quick Actions
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<AddIcon />}
+                  onClick={() => navigate('/crawls/new')}
+                >
+                  Start New Crawl
+                </Button>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<LaunchIcon />}
+                  onClick={() => navigate('/content')}
+                >
+                  Search Content
+                </Button>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<PlayIcon />}
+                  onClick={() => navigate('/generator')}
+                >
+                  Generate Content
+                </Button>
               </Box>
             </CardContent>
           </Card>
         </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Crawled Domains
+              </Typography>
+              {domains.length > 0 ? (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {domains.slice(0, 5).map((domain, index) => (
+                    <Chip 
+                      key={index} 
+                      label={domain} 
+                      variant="outlined" 
+                      size="small"
+                    />
+                  ))}
+                  {domains.length > 5 && (
+                    <Chip 
+                      label={`+${domains.length - 5} more`} 
+                      variant="outlined" 
+                      size="small"
+                      color="primary"
+                    />
+                  )}
+                </Box>
+              ) : (
+                <Typography color="textSecondary">
+                  No domains crawled yet
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
+
+      {/* Recent Crawls Table */}
+      <Card>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              Recent Crawls
+            </Typography>
+            <Button
+              size="small"
+              onClick={() => navigate('/crawls')}
+            >
+              View All
+            </Button>
+          </Box>
+
+          {crawls.length > 0 ? (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Domain</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Progress</TableCell>
+                    <TableCell>Started</TableCell>
+                    <TableCell>Delete</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {crawls.slice(0, 5).map((crawl) => (
+                    <TableRow key={crawl.crawl_id}>
+                      <TableCell>
+                        <Typography variant="body2" noWrap>
+                          {crawl.domain}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={crawl.state} 
+                          color={getStatusColor(crawl.state)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell sx={{ minWidth: 120 }}>
+                        {crawl.progress ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <LinearProgress 
+                              variant="determinate" 
+                              value={Math.min((crawl.progress.pages_crawled / Math.max(crawl.progress.pages_discovered, 1)) * 100, 100)} 
+                              sx={{ width: 60, mr: 1 }}
+                            />
+                            <Typography variant="body2">
+                              {Math.round(Math.min((crawl.progress.pages_crawled / Math.max(crawl.progress.pages_discovered, 1)) * 100, 100))}%
+                            </Typography>
+                          </Box>
+                        ) : (
+                          <Typography variant="body2" color="textSecondary">
+                            N/A
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {formatDate(crawl.start_time)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title="Delete Crawl">
+                          <IconButton 
+                            size="small"
+                            color="error"
+                            disabled={crawl.deleting}
+                            onClick={() => handleDeleteCrawl(crawl.crawl_id)}
+                          >
+                            {crawl.deleting ? (
+                              <CircularProgress size={16} color="error" />
+                            ) : (
+                              <DeleteIcon fontSize="small" />
+                            )}
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography color="textSecondary" gutterBottom>
+                No crawls found
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => navigate('/crawls/new')}
+              >
+                Start Your First Crawl
+              </Button>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
     </Box>
   )
 }

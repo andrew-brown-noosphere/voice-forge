@@ -27,7 +27,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import InfoIcon from '@mui/icons-material/Info'
-import apiService from '../services/api'
+// CHANGED: Use the authenticated useApi hook instead of apiService
+import { useApi } from '../hooks/useApi'
 
 // Platform options
 const platforms = [
@@ -53,6 +54,9 @@ const tones = [
 ]
 
 const ContentGenerator = () => {
+  // CHANGED: Use the authenticated API hook
+  const api = useApi()
+  
   const [query, setQuery] = useState('')
   const [platform, setPlatform] = useState('')
   const [tone, setTone] = useState('')
@@ -74,7 +78,8 @@ const ContentGenerator = () => {
   useEffect(() => {
     const fetchDomains = async () => {
       try {
-        const data = await apiService.listDomains()
+        // CHANGED: Use authenticated API instead of apiService
+        const data = await api.domains.list()
         setDomains(data)
         if (data.length > 0) {
           setSelectedDomain(data[0])
@@ -86,7 +91,7 @@ const ContentGenerator = () => {
     }
     
     fetchDomains()
-  }, [])
+  }, [api.domains])
 
   const handleGenerate = async () => {
     if (!query || !platform || !tone) {
@@ -99,7 +104,8 @@ const ContentGenerator = () => {
       setError(null)
       setSuccess(null)
       
-      const data = await apiService.generateContent(
+      // CHANGED: Use authenticated API instead of apiService
+      const data = await api.rag.generateContent(
         query,
         platform,
         tone,

@@ -1,219 +1,368 @@
-import React, { useEffect, useState } from 'react'
-import { useParams, Link as RouterLink } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
 import {
   Box,
   Typography,
   Card,
   CardContent,
-  Divider,
-  Grid,
+  Button,
+  Alert,
+  CircularProgress,
   Chip,
   LinearProgress,
-  Button,
-  Paper,
-  List,
-  ListItem,
-  ListItemText,
+  Grid,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Paper,
+  Divider,
+  IconButton,
+  Tooltip,
   Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
   DialogTitle,
-  Alert,
-  CircularProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  DialogContent,
+  DialogActions
 } from '@mui/material'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import CancelIcon from '@mui/icons-material/Cancel'
-import LanguageIcon from '@mui/icons-material/Language'
-import ScheduleIcon from '@mui/icons-material/Schedule'
-import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import ErrorIcon from '@mui/icons-material/Error'
-import { format } from 'date-fns'
-
-// API service
-import apiService from '../services/api'
+import {
+  ArrowBack as ArrowBackIcon,
+  Refresh as RefreshIcon,
+  Stop as StopIcon,
+  Launch as LaunchIcon,
+  Delete as DeleteIcon,
+  Info as InfoIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
+  PlayArrow as PlayArrowIcon
+} from '@mui/icons-material'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useApi } from '../hooks/useApi'
 
 const CrawlDetails = () => {
-  const { id } = useParams()
-  const [crawlStatus, setCrawlStatus] = useState(null)
+  const { id: crawlId } = useParams()
+  const navigate = useNavigate()
+  const api = useApi()
+  
+  // State management
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [confirmCancel, setConfirmCancel] = useState(false)
-  const [latestContent, setLatestContent] = useState([])
-  
+  const [error, setError] = useState(null)
+  const [crawl, setCrawl] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [cancelDialog, setCancelDialog] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // Auto-refresh for active crawls
+  const [autoRefresh, setAutoRefresh] = useState(true)
+
+  // Load crawl details
+  const loadCrawlDetails = async (showLoading = true) => {
+    try {
+      if (showLoading) {
+        setLoading(true)
+      } else {
+        setRefreshing(true)
+      }
+      setError(null)
+
+      const crawlData = await api.crawls.get(crawlId)
+      setCrawl(crawlData)
+
+      // Auto-refresh if crawl is still active
+      const isActive = ['running', 'pending', 'processing'].includes(crawlData.status)
+      setAutoRefresh(isActive)
+
+    } catch (err) {
+      console.error('Failed to load crawl details:', err)
+      setError(`Failed to load crawl details: ${err.message}`)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
+
+  // Load data on component mount
   useEffect(() => {
-    fetchCrawlStatus()
-    
-    // Poll for updates if crawl is running
-    const interval = setInterval(() => {
-      if (crawlStatus && (crawlStatus.state === 'running' || crawlStatus.state === 'pending')) {
-        fetchCrawlStatus()
-      }
-    }, 3000)
-    
-    return () => clearInterval(interval)
-  }, [id, crawlStatus?.state])
-  
-  const fetchCrawlStatus = async () => {
-    try {
-      const status = await apiService.getCrawlStatus(id)
-      setCrawlStatus(status)
-      
-      // Fetch latest content if crawl is running or completed
-      if (status.state === 'running' || status.state === 'completed') {
-        fetchLatestContent()
-      }
-      
-      setLoading(false)
-    } catch (error) {
-      console.error('Failed to fetch crawl status', error)
-      setError('Failed to fetch crawl status')
-      setLoading(false)
+    if (crawlId) {
+      loadCrawlDetails()
     }
-  }
-  
-  const fetchLatestContent = async () => {
-    try {
-      const content = await apiService.searchContent('', crawlStatus?.domain, null, 5, 0)
-      setLatestContent(content)
-    } catch (error) {
-      console.error('Failed to fetch latest content', error)
+  }, [crawlId])
+
+  // Auto-refresh effect for active crawls
+  useEffect(() => {
+    let interval
+    if (autoRefresh && crawl) {
+      interval = setInterval(() => {
+        loadCrawlDetails(false) // Refresh without showing loading spinner
+      }, 5000) // Refresh every 5 seconds
     }
-  }
-  
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval)
+      }
+    }
+  }, [autoRefresh, crawl])
+
+  // Handle crawl cancellation
   const handleCancelCrawl = async () => {
     try {
-      await apiService.cancelCrawl(id)
-      setConfirmCancel(false)
-      fetchCrawlStatus()
-    } catch (error) {
-      console.error('Failed to cancel crawl', error)
-      setError('Failed to cancel crawl')
+      await api.crawls.cancel(crawlId)
+      setCancelDialog(false)
+      // Refresh data after cancellation
+      loadCrawlDetails(false)
+    } catch (err) {
+      setError(`Failed to cancel crawl: ${err.message}`)
     }
   }
-  
-  // Get status chip color
+
+  // Handle crawl deletion
+  const handleDeleteCrawl = async () => {
+    try {
+      setDeleting(true)
+      await api.crawls.cancel(crawlId) // This might be delete endpoint
+      navigate('/crawls') // Navigate back to crawl list
+    } catch (err) {
+      setError(`Failed to delete crawl: ${err.message}`)
+      setDeleting(false)
+    }
+  }
+
+  // Get status color and icon
   const getStatusColor = (status) => {
     switch (status) {
-      case 'running':
-        return 'primary'
       case 'completed':
         return 'success'
-      case 'failed':
-        return 'error'
-      case 'cancelled':
+      case 'running':
+      case 'processing':
+        return 'primary'
+      case 'pending':
         return 'warning'
+      case 'failed':
+      case 'cancelled':
+        return 'error'
       default:
         return 'default'
     }
   }
-  
-  // Get status icon
+
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'running':
-        return <CircularProgress size={20} />
       case 'completed':
-        return <CheckCircleIcon color="success" />
+        return <CheckCircleIcon />
+      case 'running':
+      case 'processing':
+        return <PlayArrowIcon />
       case 'failed':
-        return <ErrorIcon color="error" />
       case 'cancelled':
-        return <CancelIcon color="warning" />
+        return <ErrorIcon />
       default:
-        return null
+        return <InfoIcon />
     }
   }
-  
+
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A'
+    return new Date(dateString).toLocaleString()
+  }
+
+  // Format duration
+  const formatDuration = (startTime, endTime) => {
+    if (!startTime) return 'N/A'
+    
+    const start = new Date(startTime)
+    const end = endTime ? new Date(endTime) : new Date()
+    const duration = end - start
+    
+    const hours = Math.floor(duration / (1000 * 60 * 60))
+    const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60))
+    const seconds = Math.floor((duration % (1000 * 60)) / 1000)
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`
+    } else {
+      return `${seconds}s`
+    }
+  }
+
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+      <Box sx={{ p: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
         <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading crawl details...</Typography>
       </Box>
     )
   }
-  
-  if (error) {
+
+  if (!crawl) {
     return (
-      <Alert severity="error" sx={{ mb: 3 }}>
-        {error}
-      </Alert>
+      <Box sx={{ p: 4 }}>
+        <Alert severity="error">
+          Crawl not found or you don't have permission to view it.
+        </Alert>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/crawls')}
+          sx={{ mt: 2 }}
+        >
+          Back to Crawls
+        </Button>
+      </Box>
     )
   }
-  
-  if (!crawlStatus) {
-    return (
-      <Alert severity="warning" sx={{ mb: 3 }}>
-        Crawl not found
-      </Alert>
-    )
-  }
-  
+
+  const isActive = ['running', 'pending', 'processing'].includes(crawl.status)
+  const canCancel = isActive
+
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Crawl Details
-        </Typography>
+    <Box sx={{ p: 4 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <IconButton onClick={() => navigate('/crawls')} sx={{ mr: 2 }}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Box>
+            <Typography variant="h4" component="h1">
+              Crawl Details
+            </Typography>
+            <Typography variant="subtitle1" color="textSecondary">
+              {crawl.domain}
+            </Typography>
+          </Box>
+        </Box>
         
-        {crawlStatus.state === 'running' && (
+        <Box sx={{ display: 'flex', gap: 2 }}>
           <Button
             variant="outlined"
-            color="error"
-            startIcon={<CancelIcon />}
-            onClick={() => setConfirmCancel(true)}
+            startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshIcon />}
+            onClick={() => loadCrawlDetails(false)}
+            disabled={refreshing}
           >
-            Cancel Crawl
+            Refresh
           </Button>
-        )}
+          
+          {canCancel && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<StopIcon />}
+              onClick={() => setCancelDialog(true)}
+            >
+              Cancel Crawl
+            </Button>
+          )}
+        </Box>
       </Box>
-      
+
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Auto-refresh indicator */}
+      {autoRefresh && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Auto-refreshing every 5 seconds while crawl is active</span>
+            <Button size="small" onClick={() => setAutoRefresh(false)}>
+              Stop Auto-refresh
+            </Button>
+          </Box>
+        </Alert>
+      )}
+
       <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+        {/* Status and Progress Card */}
+        <Grid item xs={12} lg={6}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                <LanguageIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-                Domain: {crawlStatus.domain}
+                Status & Progress
               </Typography>
               
-              <Divider sx={{ my: 2 }} />
-              
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">
-                    Status
-                  </Typography>
-                  <Box display="flex" alignItems="center" mt={0.5}>
-                    {getStatusIcon(crawlStatus.state)}
-                    <Chip
-                      label={
-                        crawlStatus.state.charAt(0).toUpperCase() +
-                        crawlStatus.state.slice(1)
-                      }
-                      color={getStatusColor(crawlStatus.state)}
-                      size="small"
-                      sx={{ ml: 1 }}
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  {getStatusIcon(crawl.status)}
+                  <Chip 
+                    label={crawl.status.charAt(0).toUpperCase() + crawl.status.slice(1)} 
+                    color={getStatusColor(crawl.status)}
+                    sx={{ ml: 1 }}
+                  />
+                </Box>
+                
+                {crawl.progress !== undefined && (
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2">Progress</Typography>
+                      <Typography variant="body2">{Math.round(crawl.progress * 100)}%</Typography>
+                    </Box>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={crawl.progress * 100} 
                     />
                   </Box>
-                </Grid>
-                
+                )}
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Timing Information */}
+              <Grid container spacing={2}>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="textSecondary">
                     Started
                   </Typography>
                   <Typography variant="body1">
-                    {crawlStatus.start_time
-                      ? format(new Date(crawlStatus.start_time), 'MMM d, yyyy HH:mm')
-                      : 'N/A'}
+                    {formatDate(crawl.started_at)}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">
+                    {crawl.completed_at ? 'Completed' : 'Duration'}
+                  </Typography>
+                  <Typography variant="body1">
+                    {crawl.completed_at 
+                      ? formatDate(crawl.completed_at)
+                      : formatDuration(crawl.started_at, crawl.completed_at)
+                    }
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="textSecondary">
+                    Total Duration
+                  </Typography>
+                  <Typography variant="body1">
+                    {formatDuration(crawl.started_at, crawl.completed_at)}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Configuration Card */}
+        <Grid item xs={12} lg={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Configuration
+              </Typography>
+              
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">
+                    Domain
+                  </Typography>
+                  <Typography variant="body1" noWrap>
+                    {crawl.domain}
                   </Typography>
                 </Grid>
                 
@@ -222,16 +371,7 @@ const CrawlDetails = () => {
                     Max Depth
                   </Typography>
                   <Typography variant="body1">
-                    {crawlStatus.config.max_depth}
-                  </Typography>
-                </Grid>
-                
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">
-                    Current Depth
-                  </Typography>
-                  <Typography variant="body1">
-                    {crawlStatus.progress.current_depth}
+                    {crawl.config?.max_depth || 'N/A'}
                   </Typography>
                 </Grid>
                 
@@ -240,305 +380,201 @@ const CrawlDetails = () => {
                     Max Pages
                   </Typography>
                   <Typography variant="body1">
-                    {crawlStatus.config.max_pages || 'Unlimited'}
+                    {crawl.config?.max_pages || 'N/A'}
                   </Typography>
                 </Grid>
                 
                 <Grid item xs={6}>
                   <Typography variant="body2" color="textSecondary">
-                    Request Delay
+                    Delay (seconds)
                   </Typography>
                   <Typography variant="body1">
-                    {crawlStatus.config.delay} seconds
+                    {crawl.config?.delay || 'N/A'}
                   </Typography>
-                </Grid>
-                
-                <Grid item xs={12}>
-                  <Typography variant="body2" color="textSecondary">
-                    User Agent
-                  </Typography>
-                  <Typography variant="body1" sx={{ wordBreak: 'break-all' }}>
-                    {crawlStatus.config.user_agent}
-                  </Typography>
-                </Grid>
-                
-                {crawlStatus.error && (
-                  <Grid item xs={12}>
-                    <Alert severity="error">
-                      <Typography variant="body2">Error:</Typography>
-                      {crawlStatus.error}
-                    </Alert>
-                  </Grid>
-                )}
-              </Grid>
-            </CardContent>
-          </Card>
-          
-          <Card sx={{ mt: 3 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Advanced Settings
-              </Typography>
-              
-              <Divider sx={{ my: 2 }} />
-              
-              <Accordion>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography>URL Patterns</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    Include Patterns:
-                  </Typography>
-                  {crawlStatus.config.include_patterns &&
-                  crawlStatus.config.include_patterns.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-                      {crawlStatus.config.include_patterns.map((pattern) => (
-                        <Chip key={pattern} label={pattern} size="small" />
-                      ))}
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" gutterBottom>
-                      No include patterns
-                    </Typography>
-                  )}
-                  
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    Exclude Patterns:
-                  </Typography>
-                  {crawlStatus.config.exclude_patterns &&
-                  crawlStatus.config.exclude_patterns.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {crawlStatus.config.exclude_patterns.map((pattern) => (
-                        <Chip key={pattern} label={pattern} size="small" />
-                      ))}
-                    </Box>
-                  ) : (
-                    <Typography variant="body2">No exclude patterns</Typography>
-                  )}
-                </AccordionDetails>
-              </Accordion>
-              
-              <Accordion>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography>Crawl Options</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">
-                        Respect robots.txt
-                      </Typography>
-                      <Typography variant="body1">
-                        {crawlStatus.config.respect_robots_txt ? 'Yes' : 'No'}
-                      </Typography>
-                    </Grid>
-                    
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">
-                        Follow External Links
-                      </Typography>
-                      <Typography variant="body1">
-                        {crawlStatus.config.follow_external_links ? 'Yes' : 'No'}
-                      </Typography>
-                    </Grid>
-                    
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="textSecondary">
-                        Request Timeout
-                      </Typography>
-                      <Typography variant="body1">
-                        {crawlStatus.config.timeout} seconds
-                      </Typography>
-                    </Grid>
-                  </Grid>
-                </AccordionDetails>
-              </Accordion>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Progress
-              </Typography>
-              
-              <Divider sx={{ my: 2 }} />
-              
-              <Grid container spacing={3}>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">
-                    Pages Crawled
-                  </Typography>
-                  <Typography variant="h4">
-                    {crawlStatus.progress.pages_crawled}
-                  </Typography>
-                </Grid>
-                
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">
-                    Pages Discovered
-                  </Typography>
-                  <Typography variant="h4">
-                    {crawlStatus.progress.pages_discovered}
-                  </Typography>
-                </Grid>
-                
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">
-                    Pages Failed
-                  </Typography>
-                  <Typography variant="h4" color="error">
-                    {crawlStatus.progress.pages_failed}
-                  </Typography>
-                </Grid>
-                
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">
-                    Content Extracted
-                  </Typography>
-                  <Typography variant="h4" color="primary">
-                    {crawlStatus.progress.content_extracted}
-                  </Typography>
-                </Grid>
-                
-                <Grid item xs={12}>
-                  <Typography variant="body2" color="textSecondary" gutterBottom>
-                    Crawl Progress
-                  </Typography>
-                  {crawlStatus.state === 'running' ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box sx={{ width: '100%', mr: 1 }}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={Math.min(
-                            (crawlStatus.progress.pages_crawled /
-                              Math.max(1, crawlStatus.progress.pages_discovered)) *
-                              100,
-                            100
-                          )}
-                        />
-                      </Box>
-                      <Box sx={{ minWidth: 35 }}>
-                        <Typography variant="body2" color="textSecondary">
-                          {`${Math.round(
-                            (crawlStatus.progress.pages_crawled /
-                              Math.max(1, crawlStatus.progress.pages_discovered)) *
-                              100
-                          )}%`}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ) : (
-                    <LinearProgress
-                      variant="determinate"
-                      value={100}
-                      color={
-                        crawlStatus.state === 'completed'
-                          ? 'success'
-                          : crawlStatus.state === 'failed'
-                          ? 'error'
-                          : 'warning'
-                      }
-                    />
-                  )}
                 </Grid>
               </Grid>
-            </CardContent>
-          </Card>
-          
-          <Card sx={{ mt: 3 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Latest Content
-              </Typography>
-              
-              <Divider sx={{ my: 2 }} />
-              
-              {latestContent.length > 0 ? (
-                <List>
-                  {latestContent.map((content) => (
-                    <ListItem
-                      key={content.content_id}
-                      button
-                      component={RouterLink}
-                      to={`/content/${content.content_id}`}
-                      divider
-                    >
-                      <ListItemText
-                        primary={content.metadata.title || content.url}
-                        secondary={
-                          <>
-                            <Typography
-                              variant="body2"
-                              color="textSecondary"
-                              component="span"
-                            >
-                              Type: {content.metadata.content_type}
-                            </Typography>
-                            <br />
-                            <Typography
-                              variant="body2"
-                              color="textSecondary"
-                              component="span"
-                              sx={{
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                              }}
-                            >
-                              {content.text.substring(0, 150)}...
-                            </Typography>
-                          </>
-                        }
+
+              {crawl.config?.patterns && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="textSecondary" gutterBottom>
+                    URL Patterns
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {crawl.config.patterns.map((pattern, index) => (
+                      <Chip 
+                        key={index} 
+                        label={pattern} 
+                        variant="outlined" 
+                        size="small"
                       />
-                    </ListItem>
-                  ))}
-                </List>
-              ) : (
-                <Typography variant="body1" color="textSecondary" align="center">
-                  No content extracted yet
-                </Typography>
-              )}
-              
-              {latestContent.length > 0 && (
-                <Box sx={{ mt: 2, textAlign: 'center' }}>
-                  <Button
-                    component={RouterLink}
-                    to="/content"
-                    variant="outlined"
-                    color="primary"
-                  >
-                    View All Content
-                  </Button>
+                    ))}
+                  </Box>
                 </Box>
               )}
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Statistics Card */}
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Crawl Statistics
+              </Typography>
+              
+              <Grid container spacing={3}>
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="h4" color="primary">
+                    {crawl.pages_crawled || 0}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Pages Crawled
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="h4" color="success.main">
+                    {crawl.pages_processed || 0}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Pages Processed
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="h4" color="error.main">
+                    {crawl.errors_count || 0}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Errors
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={6} sm={3}>
+                  <Typography variant="h4">
+                    {crawl.content_extracted || 0}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Content Items
+                  </Typography>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Error Log */}
+        {crawl.errors && crawl.errors.length > 0 && (
+          <Grid item xs={12}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom color="error">
+                  Errors ({crawl.errors.length})
+                </Typography>
+                
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Time</TableCell>
+                        <TableCell>URL</TableCell>
+                        <TableCell>Error</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {crawl.errors.slice(0, 10).map((error, index) => (
+                        <TableRow key={index}>
+                          <TableCell>
+                            {formatDate(error.timestamp)}
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" noWrap>
+                              {error.url}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" color="error">
+                              {error.message}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                
+                {crawl.errors.length > 10 && (
+                  <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                    Showing first 10 of {crawl.errors.length} errors
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* Actions */}
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Actions
+              </Typography>
+              
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<LaunchIcon />}
+                  onClick={() => navigate('/content')}
+                >
+                  View Extracted Content
+                </Button>
+                
+                <Button
+                  variant="outlined"
+                  startIcon={<PlayArrowIcon />}
+                  onClick={() => navigate('/generator')}
+                >
+                  Generate Content
+                </Button>
+                
+                {!isActive && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={deleting ? <CircularProgress size={16} /> : <DeleteIcon />}
+                    onClick={handleDeleteCrawl}
+                    disabled={deleting}
+                  >
+                    Delete Crawl
+                  </Button>
+                )}
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
-      
+
       {/* Cancel Confirmation Dialog */}
       <Dialog
-        open={confirmCancel}
-        onClose={() => setConfirmCancel(false)}
-        aria-labelledby="cancel-dialog-title"
-        aria-describedby="cancel-dialog-description"
+        open={cancelDialog}
+        onClose={() => setCancelDialog(false)}
       >
-        <DialogTitle id="cancel-dialog-title">Cancel Crawl?</DialogTitle>
+        <DialogTitle>
+          Cancel Crawl
+        </DialogTitle>
         <DialogContent>
-          <DialogContentText id="cancel-dialog-description">
+          <Typography>
             Are you sure you want to cancel this crawl? This action cannot be undone.
-          </DialogContentText>
+          </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmCancel(false)}>No, Continue</Button>
-          <Button onClick={handleCancelCrawl} color="error" autoFocus>
-            Yes, Cancel Crawl
+          <Button onClick={() => setCancelDialog(false)}>
+            Keep Running
+          </Button>
+          <Button onClick={handleCancelCrawl} color="error" variant="contained">
+            Cancel Crawl
           </Button>
         </DialogActions>
       </Dialog>

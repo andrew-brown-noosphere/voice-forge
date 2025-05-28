@@ -218,9 +218,11 @@ Write exceptional {platform} content now:"""
             # Get platform constraints for validation
             constraints = self._get_platform_constraints(platform)
             
-            # Check length and warn if needed
+            # Check length and provide feedback
             if len(generated_text) > constraints['max_length']:
-                logger.warning(f"Generated content ({len(generated_text)} chars) exceeds {platform} limit ({constraints['max_length']} chars)")
+                logger.info(f"Content generated for {platform}: {len(generated_text)} chars (exceeds {constraints['max_length']} limit by {len(generated_text) - constraints['max_length']} chars - consider editing)")
+            else:
+                logger.info(f"Content generated for {platform}: {len(generated_text)} chars (within {constraints['max_length']} limit)")
             
             # Prepare source chunks for response
             source_chunks = [

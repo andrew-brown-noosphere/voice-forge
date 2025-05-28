@@ -1,13 +1,23 @@
 """
 Main application file for the VoiceForge backend API server.
+Enhanced with automated RAG optimization integration.
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Query, status
+import os
+
+# Fix HuggingFace tokenizer parallelism warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Query, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPAuthorizationCredentials
 from typing import List, Optional
 import logging
 import uuid
 import os
+import jwt
+import time
+from datetime import datetime
 
 from api.models import (
     CrawlRequest, CrawlStatus, ContentSearchRequest, ContentResponse,
@@ -19,13 +29,27 @@ from crawler.service import CrawlerService
 from processor.service import ProcessorService
 from processor.rag_service import RAGService
 from database.session import get_db_session
+from auth.clerk_auth import get_current_user, get_current_user_with_org, require_org_admin, AuthUser, get_org_id_from_user, security, clerk_auth
 
-# Configure logging
+# 🆕 ADD: Import automated RAG endpoints
+from api.rag_endpoints import rag_router
+from api.analytics import router as analytics_router
+
+# Configure logging to reduce spam
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,  # Only show errors and critical issues
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+# Set specific loggers to appropriate levels
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
+logging.getLogger("fastapi").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+# Keep our app logger at WARNING for important messages only
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
 app = FastAPI(
     title="VoiceForge API",
@@ -42,13 +66,98 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 🆕 ADD: Include automated RAG optimization router
+app.include_router(rag_router)
+app.include_router(analytics_router)
+
 # Mount static files (if needed)
 # app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():
     """Root endpoint to check if the API is running."""
-    return {"status": "VoiceForge API is running", "version": "0.2.0"}
+    return {"status": "VoiceForge API is running with automated RAG", "version": "0.2.0"}
+
+@app.get("/auth/me")
+async def get_current_user_info(
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """Get current authenticated user information."""
+    return {
+        "user_id": current_user.user_id,
+        "org_id": current_user.org_id,
+        "org_role": current_user.org_role,
+        "email": current_user.email,
+        "name": current_user.name,
+        "has_org_access": current_user.has_org_access(),
+        "is_org_admin": current_user.is_org_admin()
+    }
+
+@app.get("/auth/health")
+async def auth_health():
+    """Public endpoint to check authentication service health."""
+    return {"status": "Authentication service is healthy"}
+
+@app.get("/auth/debug")
+async def debug_auth(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """Debug endpoint to inspect authentication tokens and headers."""
+    debug_info = {
+        "timestamp": datetime.now().isoformat(),
+        "headers": dict(request.headers),
+        "cookies": dict(request.cookies),
+        "auth_credentials": None,
+        "token_payload": None,
+        "clerk_verification": None
+    }
+    
+    # Check for credentials
+    if credentials:
+        debug_info["auth_credentials"] = {
+            "scheme": credentials.scheme,
+            "token_preview": f"{credentials.credentials[:20]}..." if len(credentials.credentials) > 20 else credentials.credentials
+        }
+        
+        # Try to decode the token payload (without verification)
+        try:
+            payload = jwt.decode(credentials.credentials, options={"verify_signature": False})
+            debug_info["token_payload"] = payload
+            
+            # Check specific fields needed for organization auth
+            org_data = payload.get("o", {})
+            org_id = org_data.get("id") or payload.get("org_id")
+            org_role = org_data.get("rol") or payload.get("org_role")
+            
+            debug_info["organization_info"] = {
+                "user_id": payload.get("sub"),
+                "org_object": org_data,
+                "org_id": org_id,
+                "org_role": org_role,
+                "email": payload.get("email"),
+                "has_org_id": bool(org_id),
+                "expiration": payload.get("exp"),
+                "all_claims": list(payload.keys())
+            }
+            
+        except Exception as e:
+            debug_info["token_decode_error"] = str(e)
+        
+        # Try the actual Clerk verification
+        try:
+            verified_payload = await clerk_auth.verify_token(credentials.credentials)
+            debug_info["clerk_verification"] = {
+                "success": True,
+                "payload": verified_payload
+            }
+        except Exception as e:
+            debug_info["clerk_verification"] = {
+                "success": False,
+                "error": str(e)
+            }
+    
+    return debug_info
 
 # Crawl endpoints
 
@@ -56,6 +165,7 @@ async def root():
 async def start_crawl(
     request: CrawlRequest,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     crawler_service: CrawlerService = Depends(get_crawler_service),
 ):
     """
@@ -68,16 +178,22 @@ async def start_crawl(
         # Generate a unique ID for this crawl job
         crawl_id = str(uuid.uuid4())
         
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         # Initialize the crawl status
-        status = crawler_service.init_crawl(crawl_id, request)
+        status = crawler_service.init_crawl(crawl_id, request, org_id)
         
         # Start the crawl process in the background
         background_tasks.add_task(
             crawler_service.run_crawl,
             crawl_id=crawl_id,
             domain=request.domain,
-            config=request.config
+            config=request.config,
+            org_id=org_id
         )
+        
+        logger.info(f"🎆 Started background task for crawl {crawl_id}")
         
         return status
     except Exception as e:
@@ -90,13 +206,18 @@ async def start_crawl(
 @app.delete("/crawl-all", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_crawls(
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(require_org_admin),
     crawler_service: CrawlerService = Depends(get_crawler_service),
 ):
     """Delete all crawls and associated content."""
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         # Start the deletion process in the background
         background_tasks.add_task(
-            crawler_service.delete_all_crawls
+            crawler_service.delete_all_crawls,
+            org_id
         )
         
         return None
@@ -110,11 +231,15 @@ async def delete_all_crawls(
 @app.get("/crawl/{crawl_id}", response_model=CrawlStatus)
 async def get_crawl_status(
     crawl_id: str,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     crawler_service: CrawlerService = Depends(get_crawler_service),
 ):
     """Get the status of a specific crawl job."""
     try:
-        crawl_status = crawler_service.get_crawl_status(crawl_id)
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        crawl_status = crawler_service.get_crawl_status(crawl_id, org_id)
         if not crawl_status:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -129,19 +254,52 @@ async def get_crawl_status(
         )
 
 @app.delete("/crawl/{crawl_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_crawl(
+async def delete_crawl(
     crawl_id: str,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     crawler_service: CrawlerService = Depends(get_crawler_service),
 ):
-    """Cancel an ongoing crawl job."""
+    """Delete a crawl job and its associated content."""
     try:
-        success = crawler_service.cancel_crawl(crawl_id)
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        success = crawler_service.delete_crawl(crawl_id, org_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Crawl job with ID {crawl_id} not found"
+            )
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete crawl: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete crawl: {str(e)}"
+        )
+
+@app.post("/crawl/{crawl_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_crawl(
+    crawl_id: str,
+    current_user: AuthUser = Depends(get_current_user_with_org),
+    crawler_service: CrawlerService = Depends(get_crawler_service),
+):
+    """Cancel an ongoing crawl job (only works for active crawls)."""
+    try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        success = crawler_service.cancel_crawl(crawl_id, org_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Crawl job with ID {crawl_id} not found or already completed"
             )
         return None
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to cancel crawl: {str(e)}")
         raise HTTPException(
@@ -153,11 +311,15 @@ async def cancel_crawl(
 async def list_crawls(
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    current_user: AuthUser = Depends(get_current_user_with_org),
     crawler_service: CrawlerService = Depends(get_crawler_service),
 ):
     """List all crawl jobs with pagination."""
     try:
-        crawls = crawler_service.list_crawls(limit, offset)
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        crawls = crawler_service.list_crawls(limit, offset, org_id)
         return crawls
     except Exception as e:
         logger.error(f"Failed to list crawls: {str(e)}")
@@ -171,6 +333,7 @@ async def list_crawls(
 @app.post("/content/search", response_model=List[ContentResponse])
 async def search_content(
     request: ContentSearchRequest,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     processor_service: ProcessorService = Depends(get_processor_service),
 ):
     """
@@ -180,12 +343,16 @@ async def search_content(
     from the crawled websites.
     """
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         results = processor_service.search_content(
             query=request.query,
             domain=request.domain,
             content_type=request.content_type,
             limit=request.limit,
-            offset=request.offset
+            offset=request.offset,
+            org_id=org_id
         )
         return results
     except Exception as e:
@@ -198,11 +365,15 @@ async def search_content(
 @app.get("/content/{content_id}", response_model=ContentResponse)
 async def get_content(
     content_id: str,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     processor_service: ProcessorService = Depends(get_processor_service),
 ):
     """Get a specific piece of content by ID."""
     try:
-        content = processor_service.get_content(content_id)
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        content = processor_service.get_content(content_id, org_id)
         if not content:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -218,16 +389,30 @@ async def get_content(
 
 @app.get("/domains", response_model=List[str])
 async def list_domains(
+    current_user: AuthUser = Depends(get_current_user_with_org),
     db = Depends(get_db),
 ):
     """List all domains that have been crawled."""
     try:
-        domains = db.get_all_domains()
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
         
-        # Manually add domains if the list is empty
-        if not domains:
-            domains = ["https://noosphere.tech", "https://www.noosphere.tech"]
-            
+        # Add simple in-memory caching to reduce database hits
+        cache_key = f"domains_{org_id}"
+        
+        # Check if we have recent cached data (cache for 30 seconds)
+        if hasattr(list_domains, '_cache') and cache_key in list_domains._cache:
+            cached_data, cache_time = list_domains._cache[cache_key]
+            if time.time() - cache_time < 30:  # 30 second cache
+                return cached_data
+        
+        domains = db.get_all_domains(org_id)
+        
+        # Cache the result
+        if not hasattr(list_domains, '_cache'):
+            list_domains._cache = {}
+        list_domains._cache[cache_key] = (domains, time.time())
+        
         return domains
     except Exception as e:
         logger.error(f"Failed to list domains: {str(e)}")
@@ -241,6 +426,7 @@ async def list_domains(
 @app.post("/rag/chunks/search", response_model=List[ChunkResponse])
 async def search_chunks(
     request: ChunkSearchRequest,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """
@@ -250,11 +436,15 @@ async def search_chunks(
     that can be used for retrieval-augmented generation.
     """
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         chunks = rag_service.search_chunks(
             query=request.query,
             domain=request.domain,
             content_type=request.content_type,
-            top_k=request.top_k
+            top_k=request.top_k,
+            org_id=org_id
         )
         return chunks
     except Exception as e:
@@ -267,11 +457,15 @@ async def search_chunks(
 @app.get("/rag/content/{content_id}/chunks", response_model=List[ChunkResponse])
 async def get_content_chunks(
     content_id: str,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """Get all chunks for a specific content piece."""
     try:
-        chunks = rag_service.get_content_chunks(content_id)
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        chunks = rag_service.get_content_chunks(content_id, org_id)
         return chunks
     except Exception as e:
         logger.error(f"Failed to get content chunks: {str(e)}")
@@ -284,6 +478,7 @@ async def get_content_chunks(
 async def process_content_for_rag(
     content_id: str,
     background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """
@@ -293,8 +488,11 @@ async def process_content_for_rag(
     for retrieval-augmented generation.
     """
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         # Start processing in the background
-        background_tasks.add_task(rag_service.process_content_for_rag, content_id)
+        background_tasks.add_task(rag_service.process_content_for_rag, content_id, org_id)
         
         return {"status": "processing", "content_id": content_id}
     except Exception as e:
@@ -307,6 +505,7 @@ async def process_content_for_rag(
 @app.post("/rag/generate", response_model=GeneratedContent)
 async def generate_content(
     request: GenerateContentRequest,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """
@@ -316,13 +515,17 @@ async def generate_content(
     based on the provided query and parameters.
     """
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         content = rag_service.generate_content(
             query=request.query,
             platform=request.platform,
             tone=request.tone,
             domain=request.domain,
             content_type=request.content_type,
-            top_k=request.top_k
+            top_k=request.top_k,
+            org_id=org_id
         )
         return content
     except Exception as e:
@@ -337,18 +540,22 @@ async def generate_content(
 @app.post("/templates", response_model=MarketingTemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_template(
     template: MarketingTemplateCreate,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """Create a new marketing template."""
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         # Convert to dictionary
         template_data = template.dict()
         
         # Store template
-        template_id = rag_service.create_template(template_data)
+        template_id = rag_service.create_template(template_data, org_id)
         
         # Get the created template
-        created_template = rag_service.get_template(template_id)
+        created_template = rag_service.get_template(template_id, org_id)
         
         return created_template
     except Exception as e:
@@ -361,11 +568,15 @@ async def create_template(
 @app.get("/templates/{template_id}", response_model=MarketingTemplateResponse)
 async def get_template(
     template_id: str,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """Get a specific template by ID."""
     try:
-        template = rag_service.get_template(template_id)
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
+        template = rag_service.get_template(template_id, org_id)
         
         if not template:
             raise HTTPException(
@@ -386,16 +597,21 @@ async def get_template(
 @app.post("/templates/search", response_model=List[MarketingTemplateResponse])
 async def search_templates(
     request: TemplateSearchRequest,
+    current_user: AuthUser = Depends(get_current_user_with_org),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """Search for templates with filters."""
     try:
+        # Get organization ID for multi-tenant isolation
+        org_id = get_org_id_from_user(current_user)
+        
         templates = rag_service.list_templates(
             platform=request.platform,
             tone=request.tone,
             purpose=request.purpose,
             limit=request.limit,
-            offset=request.offset
+            offset=request.offset,
+            org_id=org_id
         )
         return templates
     except Exception as e:

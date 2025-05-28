@@ -2,6 +2,7 @@
 Database interface implementation.
 """
 import json
+import logging
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from sqlalchemy import desc, func, cast, Float, or_, and_
@@ -11,6 +12,8 @@ import uuid
 from database.models import Crawl, Content, ContentChunk, MarketingTemplate
 from api.models import CrawlStatus, CrawlState, CrawlProgress, ContentType, ContentMetadata
 
+logger = logging.getLogger(__name__)
+
 class Database:
     """Database interface for VoiceForge."""
     
@@ -18,10 +21,34 @@ class Database:
         """Initialize the database interface."""
         self.session = session
     
-    def save_crawl_status(self, status: CrawlStatus):
+    def _ensure_session_health(self):
+        """Ensure the session is in a healthy state for queries."""
+        try:
+            # Test if the session is in a failed state
+            from sqlalchemy.sql.expression import text
+            self.session.execute(text("SELECT 1"))
+        except Exception as e:
+            logger.warning(f"Session unhealthy, attempting rollback: {str(e)}")
+            try:
+                self.session.rollback()
+                # Test again after rollback
+                self.session.execute(text("SELECT 1"))
+                logger.info("Session recovered after rollback")
+            except Exception as rollback_error:
+                logger.error(f"Failed to recover session: {str(rollback_error)}")
+                # Force close and recreate connection
+                try:
+                    self.session.close()
+                except Exception:
+                    pass
+                # Re-raise the error so caller knows session is unusable
+                raise rollback_error
+    
+    def save_crawl_status(self, status: CrawlStatus, org_id: str):
         """Save a new crawl status to the database."""
         crawl = Crawl(
             id=status.crawl_id,
+            org_id=org_id,
             domain=status.domain,
             state=status.state,
             start_time=status.start_time,
@@ -38,12 +65,24 @@ class Database:
         self.session.add(crawl)
         self.session.commit()
     
-    def update_crawl_status(self, status: CrawlStatus):
+    def update_crawl_status(self, status: CrawlStatus, org_id: str = None):
         """Update an existing crawl status in the database."""
-        crawl = self.session.query(Crawl).filter(Crawl.id == status.crawl_id).first()
+        crawl = self.session.query(Crawl).filter(Crawl.id == status.crawl_id)
+        
+        # If org_id is provided, filter by it for security
+        if org_id:
+            crawl = crawl.filter(Crawl.org_id == org_id)
+            
+        crawl = crawl.first()
         
         if not crawl:
-            return self.save_crawl_status(status)
+            # If crawl doesn't exist, create it
+            if org_id:
+                return self.save_crawl_status(status, org_id)
+            else:
+                # Fallback: try to save without org_id (this shouldn't happen in multi-tenant mode)
+                logger.warning(f"Creating crawl status without org_id for {status.crawl_id}")
+                return
         
         crawl.state = status.state
         crawl.start_time = status.start_time
@@ -58,9 +97,12 @@ class Database:
         
         self.session.commit()
     
-    def get_crawl_status(self, crawl_id: str) -> Optional[CrawlStatus]:
+    def get_crawl_status(self, crawl_id: str, org_id: str) -> Optional[CrawlStatus]:
         """Get a crawl status from the database."""
-        crawl = self.session.query(Crawl).filter(Crawl.id == crawl_id).first()
+        crawl = self.session.query(Crawl).filter(
+            Crawl.id == crawl_id,
+            Crawl.org_id == org_id
+        ).first()
         
         if not crawl:
             return None
@@ -82,9 +124,10 @@ class Database:
             config=json.loads(json.dumps(crawl.config))
         )
     
-    def list_crawl_statuses(self, limit: int, offset: int) -> List[CrawlStatus]:
+    def list_crawl_statuses(self, limit: int, offset: int, org_id: str) -> List[CrawlStatus]:
         """List all crawl statuses with pagination."""
         crawls = self.session.query(Crawl) \
+            .filter(Crawl.org_id == org_id) \
             .order_by(desc(Crawl.start_time)) \
             .limit(limit) \
             .offset(offset) \
@@ -110,12 +153,13 @@ class Database:
             for crawl in crawls
         ]
     
-    def save_content(self, content_data: Dict[str, Any]):
+    def save_content(self, content_data: Dict[str, Any], org_id: str):
         """Save content to the database."""
         metadata = content_data["metadata"]
         
         content = Content(
             id=content_data["content_id"],
+            org_id=org_id,
             url=content_data["url"],
             domain=content_data["domain"],
             text=content_data["text"],
@@ -135,9 +179,12 @@ class Database:
         self.session.add(content)
         self.session.commit()
     
-    def get_content(self, content_id: str) -> Optional[Dict[str, Any]]:
+    def get_content(self, content_id: str, org_id: str) -> Optional[Dict[str, Any]]:
         """Get content by ID."""
-        content = self.session.query(Content).filter(Content.id == content_id).first()
+        content = self.session.query(Content).filter(
+            Content.id == content_id,
+            Content.org_id == org_id
+        ).first()
         
         if not content:
             return None
@@ -182,7 +229,8 @@ class Database:
         domain: Optional[str] = None,
         content_type: Optional[ContentType] = None,
         limit: int = 10,
-        offset: int = 0
+        offset: int = 0,
+        org_id: str = None
     ) -> List[Dict[str, Any]]:
         """
         Search for content using vector similarity.
@@ -199,6 +247,10 @@ class Database:
         """
         try:
             query = self.session.query(Content)
+            
+            # Apply organization filter first
+            if org_id:
+                query = query.filter(Content.org_id == org_id)
             
             # Apply filters
             if domain:
@@ -259,20 +311,31 @@ class Database:
             
             return content_results
         except Exception as e:
-            print(f"Error in content search: {str(e)}")
+            logger.error(f"Error in content search: {str(e)}")
+            # Rollback the transaction on error to prevent InFailedSqlTransaction
+            try:
+                self.session.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
             # Log the error but return an empty list to avoid breaking the UI
             return []
     
-    def get_all_domains(self) -> List[str]:
+    def get_all_domains(self, org_id: str) -> List[str]:
         """Get all domains that have been crawled."""
-        domains = self.session.query(Content.domain).distinct().all()
+        domains = self.session.query(Content.domain).filter(
+            Content.org_id == org_id
+        ).distinct().all()
         domain_list = [domain[0] for domain in domains]
-        print(f"Domains found in database: {domain_list}")
+        # Only log when there are domains, or use debug level for empty results
+        if domain_list:
+            logger.debug(f"Found {len(domain_list)} domains for org {org_id}: {domain_list}")
+        else:
+            logger.debug(f"No domains found for org {org_id}")
         return domain_list
     
     # New RAG-specific methods
     
-    def store_content_chunks(self, chunks: List[Dict[str, Any]]):
+    def store_content_chunks(self, chunks: List[Dict[str, Any]], org_id: str):
         """
         Store content chunks in the database.
         
@@ -283,6 +346,7 @@ class Database:
         for chunk in chunks:
             chunk_object = ContentChunk(
                 id=chunk["id"],
+                org_id=org_id,
                 content_id=chunk["content_id"],
                 chunk_index=chunk["chunk_index"],
                 text=chunk["text"],
@@ -302,6 +366,7 @@ class Database:
         top_k: int = 5,
         domain: Optional[str] = None,
         content_type: Optional[str] = None,
+        org_id: str = None
     ) -> List[Dict[str, Any]]:
         """
         Search for content chunks using vector similarity.
@@ -315,7 +380,18 @@ class Database:
         Returns:
             List of chunk dictionaries with similarity scores
         """
+        # Ensure session is healthy before starting
+        try:
+            self._ensure_session_health()
+        except Exception as health_error:
+            logger.error(f"Cannot recover session health for vector search: {str(health_error)}")
+            return []  # Return empty results if session cannot be recovered
+        
         query = self.session.query(ContentChunk)
+        
+        # Apply organization filter first
+        if org_id:
+            query = query.filter(ContentChunk.org_id == org_id)
         
         # Apply filters through joins
         if domain or content_type:
@@ -335,8 +411,11 @@ class Database:
                 from sqlalchemy.sql.expression import text
                 extension_check = self.session.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).fetchone()
             except Exception as e:
-                print(f"Error checking vector extension for chunks: {str(e)}")
-                self.session.rollback()  # Rollback the transaction on error
+                logger.error(f"Error checking vector extension for chunks: {str(e)}")
+                try:
+                    self.session.rollback()  # Rollback the transaction on error
+                except Exception as rollback_error:
+                    logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
                 extension_check = None
             
             if extension_check:
@@ -351,16 +430,23 @@ class Database:
                 try:
                     query = query.order_by(text(f"-(content_chunks.embedding::vector(768) <=> '{embed_str}'::vector(768))::float DESC"))
                 except Exception as inner_e:
-                    print(f"Error applying vector order for chunks: {str(inner_e)}")
-                    self.session.rollback()  # Rollback the transaction on error
+                    logger.error(f"Error applying vector order for chunks: {str(inner_e)}")
+                    try:
+                        self.session.rollback()  # Rollback the transaction on error
+                    except Exception as rollback_error:
+                        logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
             else:
-                print("Vector extension not available for chunks, falling back to Python-based similarity")
+                logger.debug("Vector extension not available for chunks, falling back to Python-based similarity")
                 # No sorting in the database, we'll do it in Python
                 # Limit the query to a reasonable number to avoid loading too much data
                 query = query.limit(100)  # Set a reasonable limit
         except Exception as e:
-            print(f"Vector search fallback for chunks due to: {str(e)}")
-            self.session.rollback()  # Rollback the transaction on error
+            logger.error(f"Vector search fallback for chunks due to: {str(e)}")
+            # Rollback the transaction on error to prevent InFailedSqlTransaction
+            try:
+                self.session.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
             # Fallback to fetching all chunks and sorting in Python if the query fails
             # Limit the query to a reasonable number to avoid loading too much data
             query = query.limit(100)  # Set a reasonable limit
@@ -398,7 +484,7 @@ class Database:
                     "similarity": float(similarity_score)
                 })
             except Exception as e:
-                print(f"Error calculating chunk similarity: {str(e)}")
+                logger.error(f"Error calculating chunk similarity: {str(e)}")
                 # Still include the chunk, just without a similarity score
                 chunk_results.append({
                     "id": chunk.id,
@@ -419,188 +505,10 @@ class Database:
         top_k: int = 5,
         domain: Optional[str] = None,
         content_type: Optional[str] = None,
+        org_id: Optional[str] = None  # Add org_id parameter
     ) -> List[Dict[str, Any]]:
         """
-        Search for content chunks using basic text search.
-        This is a fallback for when vector search is not working.
-        
-        Args:
-            query: The search query text
-            top_k: Maximum number of results
-            domain: Filter by domain
-            content_type: Filter by content type
-            
-        Returns:
-            List of chunk dictionaries with similarity scores
-        """
-        try:
-            from sqlalchemy.sql.expression import text as sql_text
-            from sqlalchemy import or_, func, desc
-            
-            # Prepare the search query
-            search_terms = [term.strip() for term in query.split() if term.strip()]
-            
-            # Build base query
-            query_obj = self.session.query(ContentChunk)
-            
-            # Apply filters through joins
-            if domain or content_type:
-                query_obj = query_obj.join(Content, ContentChunk.content_id == Content.id)
-                
-                if domain:
-                    query_obj = query_obj.filter(Content.domain == domain)
-                
-                if content_type:
-                    query_obj = query_obj.filter(Content.content_type == content_type)
-            
-            # Add text search conditions if PostgreSQL full-text search is available
-            try:
-                # Try to use PostgreSQL full-text search
-                conditions = []
-                for term in search_terms:
-                    # Add condition for text column, using ILIKE for case-insensitive search
-                    conditions.append(ContentChunk.text.ilike(f'%{term}%'))
-                
-                if conditions:
-                    query_obj = query_obj.filter(or_(*conditions))
-                
-                # Add scoring using a complex case statement in SQL
-                score_expr = ""
-                for i, term in enumerate(search_terms):
-                    score_expr += f"CASE WHEN text ILIKE '%{term}%' THEN 1 ELSE 0 END + "
-                
-                if score_expr:
-                    score_expr = score_expr[:-3]  # Remove the trailing ' + '
-                    # Order by the score in descending order
-                    query_obj = query_obj.order_by(sql_text(f"({score_expr}) DESC"))
-                
-            except Exception as e:
-                print(f"Error applying full-text search: {str(e)}")
-                # Fallback to simple filtering without ordering
-                # Reset query
-                query_obj = self.session.query(ContentChunk)
-                
-                # Apply filters through joins
-                if domain or content_type:
-                    query_obj = query_obj.join(Content, ContentChunk.content_id == Content.id)
-                    
-                    if domain:
-                        query_obj = query_obj.filter(Content.domain == domain)
-                    
-                    if content_type:
-                        query_obj = query_obj.filter(Content.content_type == content_type)
-                
-                # Simple LIKE search without ordering
-                conditions = []
-                for term in search_terms:
-                    conditions.append(ContentChunk.text.ilike(f'%{term}%'))
-                
-                if conditions:
-                    query_obj = query_obj.filter(or_(*conditions))
-            
-            # Limit results
-            query_obj = query_obj.limit(top_k)
-            
-            # Execute query
-            results = query_obj.all()
-            
-            # Convert to dictionaries with fake similarity scores
-            chunk_results = []
-            
-            for chunk in results:
-                # Calculate a simple term frequency score
-                score = 0.0
-                if search_terms:
-                    term_count = 0
-                    for term in search_terms:
-                        term_count += chunk.text.lower().count(term.lower())
-                    score = min(1.0, term_count / len(search_terms))  # Normalize to [0, 1]
-                
-                chunk_results.append({
-                    "id": chunk.id,
-                    "content_id": chunk.content_id,
-                    "chunk_index": chunk.chunk_index,
-                    "text": chunk.text,
-                    "start_char": chunk.start_char,
-                    "end_char": chunk.end_char,
-                    "metadata": chunk.chunk_metadata,
-                    "similarity": score
-                })
-            
-            return chunk_results
-            
-        except Exception as e:
-            print(f"Error in text search for chunks: {str(e)}")
-            # Return an empty list as fallback
-            return []
-    
-    def check_content_exists(
-        self,
-        domain: Optional[str] = None,
-        content_type: Optional[str] = None,
-    ) -> bool:
-        """
-        Check if any content exists with the given filters.
-        
-        Args:
-            domain: Filter by domain
-            content_type: Filter by content type
-            
-        Returns:
-            True if content exists, False otherwise
-        """
-        try:
-            query = self.session.query(Content)
-            
-            if domain:
-                query = query.filter(Content.domain == domain)
-            
-            if content_type:
-                query = query.filter(Content.content_type == content_type)
-            
-            # Just check if any content exists
-            return self.session.query(query.exists()).scalar()
-        except Exception as e:
-            print(f"Error checking if content exists: {str(e)}")
-            return False
-    
-    def get_content_chunks(self, content_id: str) -> List[Dict[str, Any]]:
-        """
-        Get all chunks for a specific content.
-        
-        Args:
-            content_id: Content ID
-            
-        Returns:
-            List of chunk dictionaries
-        """
-        chunks = self.session.query(ContentChunk) \
-            .filter(ContentChunk.content_id == content_id) \
-            .order_by(ContentChunk.chunk_index) \
-            .all()
-        
-        return [
-            {
-                "id": chunk.id,
-                "content_id": chunk.content_id,
-                "chunk_index": chunk.chunk_index,
-                "text": chunk.text,
-                "start_char": chunk.start_char,
-                "end_char": chunk.end_char,
-                "metadata": chunk.chunk_metadata
-            }
-            for chunk in chunks
-        ]
-    
-    def search_chunks_by_text(
-        self,
-        query: str,
-        top_k: int = 5,
-        domain: Optional[str] = None,
-        content_type: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for content chunks using text search.
+        Search for content chunks using text search with multi-tenant support.
         This is a fallback for when vector search doesn't work.
         
         Args:
@@ -608,16 +516,31 @@ class Database:
             top_k: Maximum number of results
             domain: Filter by domain
             content_type: Filter by content type
+            org_id: Organization ID for multi-tenant isolation
             
         Returns:
             List of chunk dictionaries with similarity scores
         """
         try:
+            # Ensure session is healthy before starting
+            try:
+                self._ensure_session_health()
+            except Exception as health_error:
+                logger.error(f"Cannot recover session health for text search: {str(health_error)}")
+                return []  # Return empty results if session cannot be recovered
+            
             # Prepare the search query
             search_terms = [term.strip().lower() for term in query.split() if term.strip()]
             
+            if not search_terms:
+                return []
+            
             # Build base query
             query_obj = self.session.query(ContentChunk)
+            
+            # Apply organization filter first
+            if org_id:
+                query_obj = query_obj.filter(ContentChunk.org_id == org_id)
             
             # Apply filters through joins if needed
             if domain or content_type:
@@ -640,8 +563,8 @@ class Database:
                 if conditions:
                     query_obj = query_obj.filter(or_(*conditions))
             
-            # Limit results
-            results = query_obj.limit(top_k*2).all()  # Get more than needed to score and filter
+            # Limit results to prevent excessive loading
+            results = query_obj.limit(top_k * 2).all()  # Get more than needed to score and filter
             
             # Convert to dictionaries with calculated similarity scores
             chunk_results = []
@@ -678,11 +601,78 @@ class Database:
             return chunk_results[:top_k]
             
         except Exception as e:
-            print(f"Error in text search for chunks: {str(e)}")
+            logger.error(f"Error in text search for chunks: {str(e)}")
+            # Rollback the transaction on error to prevent InFailedSqlTransaction
+            try:
+                self.session.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback transaction: {str(rollback_error)}")
             # Return an empty list as fallback
             return []
     
-    def store_template(self, template_data: Dict[str, Any]) -> str:
+    def check_content_exists(
+        self,
+        domain: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> bool:
+        """
+        Check if any content exists with the given filters.
+        
+        Args:
+            domain: Filter by domain
+            content_type: Filter by content type
+            
+        Returns:
+            True if content exists, False otherwise
+        """
+        try:
+            query = self.session.query(Content)
+            
+            if domain:
+                query = query.filter(Content.domain == domain)
+            
+            if content_type:
+                query = query.filter(Content.content_type == content_type)
+            
+            # Just check if any content exists
+            return self.session.query(query.exists()).scalar()
+        except Exception as e:
+            print(f"Error checking if content exists: {str(e)}")
+            return False
+    
+    def get_content_chunks(self, content_id: str, org_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all chunks for a specific content.
+        
+        Args:
+            content_id: Content ID
+            
+        Returns:
+            List of chunk dictionaries
+        """
+        chunks = self.session.query(ContentChunk) \
+            .filter(
+                ContentChunk.content_id == content_id,
+                ContentChunk.org_id == org_id
+            ) \
+            .order_by(ContentChunk.chunk_index) \
+            .all()
+        
+        return [
+            {
+                "id": chunk.id,
+                "content_id": chunk.content_id,
+                "chunk_index": chunk.chunk_index,
+                "text": chunk.text,
+                "start_char": chunk.start_char,
+                "end_char": chunk.end_char,
+                "metadata": chunk.chunk_metadata
+            }
+            for chunk in chunks
+        ]
+    
+
+    def store_template(self, template_data: Dict[str, Any], org_id: str) -> str:
         """
         Store a marketing template in the database.
         
@@ -696,6 +686,7 @@ class Database:
         
         template = MarketingTemplate(
             id=template_id,
+            org_id=org_id,
             name=template_data["name"],
             description=template_data.get("description"),
             template_text=template_data["template_text"],
@@ -717,7 +708,8 @@ class Database:
         template_id: Optional[str] = None,
         platform: Optional[str] = None,
         tone: Optional[str] = None,
-        purpose: Optional[str] = None
+        purpose: Optional[str] = None,
+        org_id: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get a marketing template.
@@ -732,6 +724,10 @@ class Database:
             Template dictionary or None if not found
         """
         query = self.session.query(MarketingTemplate)
+        
+        # Apply organization filter first
+        if org_id:
+            query = query.filter(MarketingTemplate.org_id == org_id)
         
         if template_id:
             query = query.filter(MarketingTemplate.id == template_id)
@@ -771,7 +767,8 @@ class Database:
         tone: Optional[str] = None,
         purpose: Optional[str] = None,
         limit: int = 10,
-        offset: int = 0
+        offset: int = 0,
+        org_id: str = None
     ) -> List[Dict[str, Any]]:
         """
         List marketing templates with filters.
@@ -787,6 +784,10 @@ class Database:
             List of template dictionaries
         """
         query = self.session.query(MarketingTemplate)
+        
+        # Apply organization filter first
+        if org_id:
+            query = query.filter(MarketingTemplate.org_id == org_id)
         
         # Apply filters
         if platform:

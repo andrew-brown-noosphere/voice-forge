@@ -20,12 +20,13 @@ logger = logging.getLogger(__name__)
 class PlaywrightCrawler:
     """Crawler implementation using Playwright for JavaScript rendering."""
     
-    def __init__(self, domain: str, config: CrawlConfig, db, crawl_id: str):
+    def __init__(self, domain: str, config: CrawlConfig, db, crawl_id: str, org_id: str):
         """Initialize the crawler."""
         self.domain = self._normalize_domain(domain)
         self.config = config
         self.db = db
         self.crawl_id = crawl_id
+        self.org_id = org_id  # Add org_id for multi-tenant isolation
         
         self.visited_urls = set()
         self.queue = []
@@ -193,10 +194,11 @@ class PlaywrightCrawler:
                         )
                         
                         if content_data:
-                            # Save content to database
+                            # Save content to database with org_id
                             content_data['crawl_id'] = self.crawl_id
+                            content_data['org_id'] = self.org_id  # Add org_id for multi-tenant isolation
                             content_data['extracted_at'] = datetime.now()
-                            self.db.save_content(content_data)
+                            self.db.save_content(content_data, self.org_id)
                             self.content_extracted += 1
                         
                         # Extract links for further crawling

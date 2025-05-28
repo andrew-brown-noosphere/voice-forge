@@ -47,11 +47,11 @@ class ProcessorService:
         
         return self.embedding_model
     
-    def process_content(self, content_id: str):
+    def process_content(self, content_id: str, org_id: str):
         """Process content to extract entities, vectors, etc."""
         try:
             # Get content from database
-            content = self.db.get_content(content_id)
+            content = self.db.get_content(content_id, org_id)
             if not content:
                 logger.warning(f"Content {content_id} not found")
                 return
@@ -85,9 +85,9 @@ class ProcessorService:
         except Exception as e:
             logger.error(f"Failed to process content {content_id}: {str(e)}")
     
-    def get_content(self, content_id: str) -> Optional[ContentResponse]:
+    def get_content(self, content_id: str, org_id: str) -> Optional[ContentResponse]:
         """Get content by ID."""
-        content = self.db.get_content(content_id)
+        content = self.db.get_content(content_id, org_id)
         if not content:
             return None
         
@@ -99,7 +99,8 @@ class ProcessorService:
         domain: Optional[str] = None,
         content_type: Optional[ContentType] = None,
         limit: int = 10,
-        offset: int = 0
+        offset: int = 0,
+        org_id: str = None
     ) -> List[ContentResponse]:
         """
         Search for content based on query text and filters.
@@ -125,7 +126,8 @@ class ProcessorService:
                 domain=domain,
                 content_type=content_type,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                org_id=org_id
             )
             
             # Convert to response models

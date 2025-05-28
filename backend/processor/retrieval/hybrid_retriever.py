@@ -16,7 +16,7 @@ class HybridRetriever:
         self.vector_weight = 0.7  # Weight for vector search results
         self.keyword_weight = 0.3  # Weight for keyword search results
     
-    def retrieve(self, query, top_k=5, domain=None, content_type=None):
+    def retrieve(self, query, top_k=5, domain=None, content_type=None, org_id=None):
         """
         Perform hybrid retrieval.
         
@@ -25,6 +25,7 @@ class HybridRetriever:
             top_k: Number of results to return
             domain: Optional domain filter
             content_type: Optional content type filter
+            org_id: Organization ID for multi-tenant isolation
             
         Returns:
             Combined search results
@@ -48,7 +49,8 @@ class HybridRetriever:
                     query_embedding=query_embedding,
                     top_k=top_k*2,  # Get more results than needed
                     domain=domain,
-                    content_type=content_type
+                    content_type=content_type,
+                    org_id=org_id  # Pass org_id for multi-tenant isolation
                 )
                 logger.debug(f"Vector search found {len(vector_results)} results")
             except Exception as e:
@@ -61,7 +63,8 @@ class HybridRetriever:
                 query=query,
                 top_k=top_k*2,  # Get more results than needed
                 domain=domain,
-                content_type=content_type
+                content_type=content_type,
+                org_id=org_id  # Pass org_id for multi-tenant isolation
             )
             logger.debug(f"Keyword search found {len(keyword_results)} results")
         except Exception as e:

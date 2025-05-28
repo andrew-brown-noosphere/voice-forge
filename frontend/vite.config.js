@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    port: 3000,
+    port: 4173,  // Alternative port
+    strictPort: true,  // Fail if port is busy instead of auto-increment
     proxy: {
       '/api': {
         target: 'http://backend:8000',

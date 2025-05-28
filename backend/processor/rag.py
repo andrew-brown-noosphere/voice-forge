@@ -101,19 +101,20 @@ class RAGSystem:
         
         return self.embedding_model
     
-    def process_content_for_rag(self, content_id: str) -> bool:
+    def process_content_for_rag(self, content_id: str, org_id: Optional[str] = None) -> bool:
         """
         Process content into chunks for RAG.
         
         Args:
             content_id: ID of the content to process
+            org_id: Organization ID for multi-tenant isolation
             
         Returns:
             Success status
         """
         try:
-            # Get content from database
-            content = self.db.get_content(content_id)
+            # Get content from database (with org_id for multi-tenant isolation)
+            content = self.db.get_content(content_id, org_id)
             if not content:
                 logger.warning(f"Content {content_id} not found")
                 return False
@@ -160,7 +161,8 @@ class RAGSystem:
         query: str, 
         top_k: int = 5, 
         domain: Optional[str] = None,
-        content_type: Optional[str] = None
+        content_type: Optional[str] = None,
+        org_id: Optional[str] = None  # Add org_id parameter
     ) -> List[Dict[str, Any]]:
         """
         Retrieve the most relevant chunks for a query.
@@ -170,6 +172,7 @@ class RAGSystem:
             top_k: Number of chunks to retrieve
             domain: Optional domain filter
             content_type: Optional content type filter
+            org_id: Organization ID for multi-tenant isolation
             
         Returns:
             List of relevant chunks with similarity scores
@@ -194,7 +197,8 @@ class RAGSystem:
                 query=reformulated_query,
                 top_k=top_k,  # Get top_k for each reformulation
                 domain=domain,
-                content_type=content_type
+                content_type=content_type,
+                org_id=org_id  # Pass org_id for multi-tenant isolation
             )
             all_chunks.extend(chunks)
         
@@ -397,7 +401,8 @@ class RAGSystem:
         tone: str,
         domain: Optional[str] = None,
         content_type: Optional[str] = None,
-        top_k: int = 5
+        top_k: int = 5,
+        org_id: Optional[str] = None  # Add org_id parameter
     ) -> Dict[str, Any]:
         """
         End-to-end process to retrieve relevant chunks and generate a response.
@@ -409,6 +414,7 @@ class RAGSystem:
             domain: Optional domain filter
             content_type: Optional content type filter
             top_k: Number of chunks to retrieve
+            org_id: Organization ID for multi-tenant isolation
             
         Returns:
             Generated response with source information
@@ -422,7 +428,8 @@ class RAGSystem:
             query=query,
             top_k=top_k,
             domain=domain,
-            content_type=content_type
+            content_type=content_type,
+            org_id=org_id  # Pass org_id to retrieval
         )
         
         # Step 2: Generate response

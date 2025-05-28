@@ -49,12 +49,12 @@ const theme = createTheme({
 })
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <Router>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <App />
-      </ThemeProvider>
-    </Router>
-  </React.StrictMode>,
+  // <React.StrictMode> temporarily disabled to debug infinite loop
+  <Router>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <App />
+    </ThemeProvider>
+  </Router>
+  // </React.StrictMode>,
 )

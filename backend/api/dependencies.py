@@ -19,8 +19,18 @@ def get_db():
     db = Database(db_session)
     try:
         yield db
+    except Exception as e:
+        # Rollback on any exception to ensure clean state
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+        raise e
     finally:
-        db_session.close()
+        try:
+            db_session.close()
+        except Exception:
+            pass
 
 def get_crawler_service(db = Depends(get_db)):
     """Get the crawler service singleton."""

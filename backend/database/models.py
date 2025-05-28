@@ -12,6 +12,7 @@ from sqlalchemy.types import TypeDecorator
 # Define a Vector type for pgvector
 class Vector(TypeDecorator):
     impl = sa.ARRAY(sa.Float)
+    cache_ok = True  # Fix SQLAlchemy warning about cache key
     
     def process_bind_param(self, value, dialect):
         return value
@@ -26,6 +27,7 @@ class Crawl(Base):
     __tablename__ = "crawls"
     
     id = Column(String, primary_key=True)
+    org_id = Column(String, nullable=False, index=True)  # Multi-tenant organization ID
     domain = Column(String, nullable=False, index=True)
     state = Column(String, nullable=False)
     start_time = Column(DateTime, nullable=True)
@@ -42,12 +44,19 @@ class Crawl(Base):
     
     # Relationships
     contents = relationship("Content", back_populates="crawl")
+    
+    __table_args__ = (
+        # Multi-tenant indexes for better query performance
+        Index('ix_crawls_org_id_domain', 'org_id', 'domain'),
+        Index('ix_crawls_org_id_state', 'org_id', 'state'),
+    )
 
 class Content(Base):
     """Database model for website content."""
     __tablename__ = "contents"
     
     id = Column(String, primary_key=True)
+    org_id = Column(String, nullable=False, index=True)  # Multi-tenant organization ID
     url = Column(String, nullable=False, index=True)
     domain = Column(String, nullable=False, index=True)
     crawl_id = Column(String, ForeignKey("crawls.id"), nullable=False)
@@ -75,12 +84,20 @@ class Content(Base):
     # Relationships
     crawl = relationship("Crawl", back_populates="contents")
     chunks = relationship("ContentChunk", back_populates="content")
+    
+    __table_args__ = (
+        # Multi-tenant indexes for better query performance
+        Index('ix_contents_org_id_domain', 'org_id', 'domain'),
+        Index('ix_contents_org_id_content_type', 'org_id', 'content_type'),
+        Index('ix_contents_org_id_url', 'org_id', 'url'),
+    )
 
 class ContentChunk(Base):
     """Database model for content chunks used in RAG."""
     __tablename__ = "content_chunks"
     
     id = Column(String, primary_key=True)
+    org_id = Column(String, nullable=False, index=True)  # Multi-tenant organization ID
     content_id = Column(String, ForeignKey("contents.id"), nullable=False)
     chunk_index = Column(Integer, nullable=False)
     
@@ -101,7 +118,10 @@ class ContentChunk(Base):
     __table_args__ = (
         # Create an index on content_id and chunk_index
         # This will help with retrieving chunks in order
-        sa.Index('ix_content_chunks_content_id_chunk_index', 'content_id', 'chunk_index', postgresql_using='btree'),
+        Index('ix_content_chunks_content_id_chunk_index', 'content_id', 'chunk_index'),
+        # Multi-tenant indexes
+        Index('ix_content_chunks_org_id', 'org_id'),
+        Index('ix_content_chunks_org_id_content_id', 'org_id', 'content_id'),
     )
 
 class MarketingTemplate(Base):
@@ -109,6 +129,7 @@ class MarketingTemplate(Base):
     __tablename__ = "marketing_templates"
     
     id = Column(String, primary_key=True)
+    org_id = Column(String, nullable=False, index=True)  # Multi-tenant organization ID
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     
@@ -127,3 +148,10 @@ class MarketingTemplate(Base):
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=True)
     created_by = Column(String, nullable=True)
+    
+    __table_args__ = (
+        # Multi-tenant indexes for better query performance
+        Index('ix_marketing_templates_org_id_platform', 'org_id', 'platform'),
+        Index('ix_marketing_templates_org_id_tone', 'org_id', 'tone'),
+        Index('ix_marketing_templates_org_id_purpose', 'org_id', 'purpose'),
+    )
