@@ -124,6 +124,13 @@ class CrawlerService:
             
             logger.info(f"✅ Updated crawl {crawl_id} status to RUNNING at {status.start_time}")
             
+            # 🔍 DEBUG: Log config before creating crawler
+            logger.warning(f"🔍 SERVICE DEBUG: About to create crawler with config:")
+            logger.warning(f"  config.max_pages: {config.max_pages}")
+            logger.warning(f"  config.max_depth: {config.max_depth}")
+            logger.warning(f"  config.delay: {config.delay}")
+            logger.warning(f"  config type: {type(config)}")
+            
             # Initialize crawler
             crawler = PlaywrightCrawler(
                 domain=domain,
@@ -242,6 +249,13 @@ class CrawlerService:
             # Initialize crawler
             from api.models import CrawlConfig
             config_obj = CrawlConfig(**config) if isinstance(config, dict) else config
+            
+            # 🔍 DEBUG: Log sync config before creating crawler
+            logger.warning(f"🔍 SERVICE SYNC DEBUG: About to create crawler with config:")
+            logger.warning(f"  config_obj.max_pages: {config_obj.max_pages}")
+            logger.warning(f"  config_obj.max_depth: {config_obj.max_depth}")
+            logger.warning(f"  config_obj type: {type(config_obj)}")
+            logger.warning(f"  original config dict: {config}")
             
             crawler = PlaywrightCrawler(
                 domain=domain,

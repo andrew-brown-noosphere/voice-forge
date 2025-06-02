@@ -17,11 +17,8 @@ export function useApi() {
     }
 
     try {
-      // Get fresh token with enhanced options
-      const token = await getToken({ 
-        skipCache: true
-        // Remove template specification - let Clerk use its default
-      });
+      // Get token (use cache to avoid rate limits)
+      const token = await getToken();
       
       if (!token) {
         throw new Error('No token available');
@@ -86,7 +83,7 @@ export function useApi() {
     debug: {
       testAuth: async () => {
         try {
-          const token = await getToken({ skipCache: true });
+          const token = await getToken();
           console.log('🔍 Current auth state:');
           console.log('- Signed in:', isSignedIn);
           console.log('- Org ID:', orgId);
@@ -104,7 +101,7 @@ export function useApi() {
         }
       },
       getCurrentToken: async () => {
-        return await getToken({ skipCache: true });
+        return await getToken();
       }
     },
     // Crawl operations

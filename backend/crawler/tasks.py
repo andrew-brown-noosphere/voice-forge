@@ -36,12 +36,16 @@ def crawl_website_task(self, crawl_id: str, domain: str, config: Dict[str, Any],
             meta={"status": "Initializing crawler", "progress": 0}
         )
         
-        # Get database session
+        # Get database session and wrap it
         db_session = get_db_session()
         
         try:
+            # Import and create Database wrapper
+            from database.db import Database
+            db = Database(db_session)
+            
             # Initialize crawler service
-            crawler_service = CrawlerService(db_session)
+            crawler_service = CrawlerService(db)
             
             # Run the crawl
             result = crawler_service.run_crawl_sync(
@@ -90,15 +94,19 @@ def process_crawled_content_task(self, crawl_id: str, org_id: str):
             meta={"status": "Processing content for RAG", "progress": 0}
         )
         
-        # Get database session
+        # Get database session and wrap it
         db_session = get_db_session()
         
         try:
+            # Import and create Database wrapper
+            from database.db import Database
+            db = Database(db_session)
+            
             # Import processor service
             from processor.service import ProcessorService
             
             # Initialize processor service
-            processor_service = ProcessorService(db_session)
+            processor_service = ProcessorService(db)
             
             # Process all content from the crawl
             result = processor_service.process_crawl_for_rag(
@@ -144,12 +152,16 @@ def cleanup_old_crawls_task(self, days_old: int = 30):
             meta={"status": "Cleaning up old crawls", "progress": 0}
         )
         
-        # Get database session
+        # Get database session and wrap it
         db_session = get_db_session()
         
         try:
+            # Import and create Database wrapper
+            from database.db import Database
+            db = Database(db_session)
+            
             # Initialize crawler service
-            crawler_service = CrawlerService(db_session)
+            crawler_service = CrawlerService(db)
             
             # Perform cleanup
             result = crawler_service.cleanup_old_crawls(

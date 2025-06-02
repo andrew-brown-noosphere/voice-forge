@@ -73,11 +73,22 @@ RETRY_KWARGS = {
 # Import tasks to register them
 try:
     from crawler import tasks as crawler_tasks
-    from processor import tasks as processor_tasks  
-    from processor import rag_tasks
+    print("✅ Crawler tasks imported successfully")
 except ImportError as e:
-    print(f"Warning: Could not import task modules: {e}")
-    print("This is normal if tasks modules don't exist yet")
+    print(f"⚠️  Warning: Could not import crawler tasks: {e}")
+    print("💡 Run: pip install -r requirements.txt")
+
+try:
+    from processor import tasks as processor_tasks  
+    print("✅ Processor tasks imported successfully")
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import processor tasks: {e}")
+    
+try:
+    from processor import rag_tasks
+    print("✅ RAG tasks imported successfully")
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import RAG tasks: {e}")
 
 if __name__ == "__main__":
     celery_app.start()

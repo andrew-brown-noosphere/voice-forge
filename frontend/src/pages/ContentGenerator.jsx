@@ -74,24 +74,44 @@ const ContentGenerator = () => {
   const [sourceChunks, setSourceChunks] = useState([])
   const [showSources, setShowSources] = useState(false)
 
-  // Fetch domains on component mount
+  // Fetch domains on component mount with better error handling
   useEffect(() => {
     const fetchDomains = async () => {
+      // Don't fetch domains if already loading or if we don't have api access
+      if (loading || !api) {
+        return
+      }
+      
       try {
-        // CHANGED: Use authenticated API instead of apiService
+        setLoading(true)
+        console.log('Fetching domains...')
         const data = await api.domains.list()
-        setDomains(data)
-        if (data.length > 0) {
+        console.log('Domains fetched successfully:', data)
+        setDomains(data || [])
+        if (data && data.length > 0) {
           setSelectedDomain(data[0])
         }
       } catch (err) {
-        console.error('Error fetching domains:', err)
-        setError('Failed to load domains. Please try again later.')
+        console.warn('Could not fetch domains (this is not critical):', err.message)
+        
+        // Don't show error to user - domains are optional
+        // Set empty domains array as fallback
+        setDomains([])
+        
+        // Only set error for auth issues that affect content generation
+        if (err.message.includes('Not authenticated') || err.message.includes('401')) {
+          console.error('Authentication issue - this will affect content generation')
+        }
+      } finally {
+        setLoading(false)
       }
     }
     
-    fetchDomains()
-  }, [api.domains])
+    // Add delay to prevent immediate execution on mount
+    const timeoutId = setTimeout(fetchDomains, 100)
+    
+    return () => clearTimeout(timeoutId)
+  }, []) // Remove api dependency to prevent re-fetching
 
   const handleGenerate = async () => {
     if (!query || !platform || !tone) {
@@ -104,6 +124,15 @@ const ContentGenerator = () => {
       setError(null)
       setSuccess(null)
       
+      console.log('Generating content with params:', {
+        query,
+        platform,
+        tone,
+        selectedDomain: selectedDomain || undefined,
+        contentType: contentType || undefined,
+        topK
+      })
+      
       // CHANGED: Use authenticated API instead of apiService
       const data = await api.rag.generateContent(
         query,
@@ -114,12 +143,38 @@ const ContentGenerator = () => {
         topK
       )
       
+      console.log('Content generation response:', data)
+      
+      if (!data || !data.text) {
+        throw new Error('Invalid response format - no content text received')
+      }
+      
       setGeneratedContent(data.text)
       setSourceChunks(data.source_chunks || [])
       setSuccess('Content generated successfully!')
     } catch (err) {
       console.error('Error generating content:', err)
-      setError('Failed to generate content. Please try again later.')
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to generate content. '
+      
+      if (err.message.includes('401') || err.message.includes('Not authenticated')) {
+        errorMessage += 'Authentication issue - please refresh the page and try again.'
+      } else if (err.message.includes('404')) {
+        errorMessage += 'Content generation service not found. Please check if the backend is running.'
+      } else if (err.message.includes('500')) {
+        errorMessage += 'Server error occurred. Please try again in a moment.'
+      } else if (err.message.includes('timeout')) {
+        errorMessage += 'Request timed out. Please try again.'
+      } else if (err.message.includes('Invalid response')) {
+        errorMessage += 'Received invalid response from server.'
+      } else if (err.message.trim() === '') {
+        errorMessage += 'Backend returned empty error. Server may be stuck - try refreshing the page.'
+      } else {
+        errorMessage += `Error: ${err.message}`
+      }
+      
+      setError(errorMessage)
     } finally {
       setGenerating(false)
     }

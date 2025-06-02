@@ -66,10 +66,12 @@ const CrawlDetails = () => {
       setError(null)
 
       const crawlData = await api.crawls.get(crawlId)
+      console.log('🔍 Full crawl data received:', JSON.stringify(crawlData, null, 2))
       setCrawl(crawlData)
 
       // Auto-refresh if crawl is still active
-      const isActive = ['running', 'pending', 'processing'].includes(crawlData.status)
+      const crawlState = crawlData.state || crawlData.status || 'unknown'
+      const isActive = ['running', 'pending', 'processing'].includes(crawlState)
       setAutoRefresh(isActive)
 
     } catch (err) {
@@ -214,7 +216,9 @@ const CrawlDetails = () => {
     )
   }
 
-  const isActive = ['running', 'pending', 'processing'].includes(crawl.status)
+  // Get the status from either 'state' or 'status' field (for compatibility)
+  const crawlStatus = crawl.state || crawl.status || 'unknown'
+  const isActive = ['running', 'pending', 'processing'].includes(crawlStatus)
   const canCancel = isActive
 
   return (
@@ -288,15 +292,15 @@ const CrawlDetails = () => {
               
               <Box sx={{ mb: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  {getStatusIcon(crawl.status)}
+                  {getStatusIcon(crawlStatus)}
                   <Chip 
-                    label={crawl.status.charAt(0).toUpperCase() + crawl.status.slice(1)} 
-                    color={getStatusColor(crawl.status)}
+                    label={crawlStatus.charAt(0).toUpperCase() + crawlStatus.slice(1)} 
+                    color={getStatusColor(crawlStatus)}
                     sx={{ ml: 1 }}
                   />
                 </Box>
                 
-                {crawl.progress !== undefined && (
+                {crawl.progress !== undefined && typeof crawl.progress === 'number' && (
                   <Box sx={{ mb: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Typography variant="body2">Progress</Typography>
@@ -319,18 +323,18 @@ const CrawlDetails = () => {
                     Started
                   </Typography>
                   <Typography variant="body1">
-                    {formatDate(crawl.started_at)}
+                    {formatDate(crawl.start_time)}
                   </Typography>
                 </Grid>
                 
                 <Grid item xs={6}>
                   <Typography variant="body2" color="textSecondary">
-                    {crawl.completed_at ? 'Completed' : 'Duration'}
+                    {crawl.end_time ? 'Completed' : 'Duration'}
                   </Typography>
                   <Typography variant="body1">
-                    {crawl.completed_at 
-                      ? formatDate(crawl.completed_at)
-                      : formatDuration(crawl.started_at, crawl.completed_at)
+                    {crawl.end_time 
+                      ? formatDate(crawl.end_time)
+                      : formatDuration(crawl.start_time, crawl.end_time)
                     }
                   </Typography>
                 </Grid>
@@ -340,7 +344,7 @@ const CrawlDetails = () => {
                     Total Duration
                   </Typography>
                   <Typography variant="body1">
-                    {formatDuration(crawl.started_at, crawl.completed_at)}
+                    {formatDuration(crawl.start_time, crawl.end_time)}
                   </Typography>
                 </Grid>
               </Grid>
@@ -394,18 +398,38 @@ const CrawlDetails = () => {
                 </Grid>
               </Grid>
 
-              {crawl.config?.patterns && (
+              {crawl.config?.include_patterns && crawl.config.include_patterns.length > 0 && (
                 <Box sx={{ mt: 2 }}>
                   <Typography variant="body2" color="textSecondary" gutterBottom>
-                    URL Patterns
+                    Include Patterns
                   </Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                    {crawl.config.patterns.map((pattern, index) => (
+                    {crawl.config.include_patterns.map((pattern, index) => (
                       <Chip 
                         key={index} 
                         label={pattern} 
                         variant="outlined" 
                         size="small"
+                        color="success"
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              
+              {crawl.config?.exclude_patterns && crawl.config.exclude_patterns.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="textSecondary" gutterBottom>
+                    Exclude Patterns
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {crawl.config.exclude_patterns.map((pattern, index) => (
+                      <Chip 
+                        key={index} 
+                        label={pattern} 
+                        variant="outlined" 
+                        size="small"
+                        color="error"
                       />
                     ))}
                   </Box>
@@ -426,7 +450,7 @@ const CrawlDetails = () => {
               <Grid container spacing={3}>
                 <Grid item xs={6} sm={3}>
                   <Typography variant="h4" color="primary">
-                    {crawl.pages_crawled || 0}
+                    {crawl.progress?.pages_crawled || 0}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
                     Pages Crawled
@@ -435,28 +459,28 @@ const CrawlDetails = () => {
                 
                 <Grid item xs={6} sm={3}>
                   <Typography variant="h4" color="success.main">
-                    {crawl.pages_processed || 0}
+                    {crawl.progress?.content_extracted || 0}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
-                    Pages Processed
+                    Content Extracted
                   </Typography>
                 </Grid>
                 
                 <Grid item xs={6} sm={3}>
                   <Typography variant="h4" color="error.main">
-                    {crawl.errors_count || 0}
+                    {crawl.progress?.pages_failed || 0}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
-                    Errors
+                    Failed Pages
                   </Typography>
                 </Grid>
                 
                 <Grid item xs={6} sm={3}>
                   <Typography variant="h4">
-                    {crawl.content_extracted || 0}
+                    {crawl.progress?.pages_discovered || 0}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
-                    Content Items
+                    Pages Discovered
                   </Typography>
                 </Grid>
               </Grid>

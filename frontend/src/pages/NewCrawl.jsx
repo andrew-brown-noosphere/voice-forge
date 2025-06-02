@@ -44,10 +44,10 @@ const NewCrawl = () => {
   const [domain, setDomain] = useState('')
   const [config, setConfig] = useState({
     max_depth: 3,
-    max_pages: 20,  // 🎯 Reduced for focused crawling
+    max_pages: null,  // 🔧 FIX: Set to null for unlimited pages by default
     respect_robots_txt: true,
     delay: 2.0,     // 🎯 Increased to 2 seconds to avoid blocking
-    timeout: 15,    // 🎯 Reduced from 30 to 15 seconds
+    timeout: 30,    // 🔧 FIX: Increased timeout for more complex sites
     follow_external_links: false,
     exclude_patterns: [
       '.*/contact.*',     // 🎯 Skip contact pages (slow)
@@ -62,12 +62,7 @@ const NewCrawl = () => {
       '.*\\.css$',        // 🎯 Skip stylesheets
       '.*\\.js$',         // 🎯 Skip JavaScript files
     ],
-    include_patterns: [
-      '.*/product/?$',    // 🎯 Include /product page
-      '.*/product/.*',    // 🎯 Include /product/* subpages
-      '.*/blog/?$',       // 🎯 Include /blog page
-      '.*/blog/.*',       // 🎯 Include /blog/* subpages
-    ],
+    include_patterns: [],  // 🔧 FIX: Start with no include patterns - let user add them if needed
     // 🎯 FIXED: Realistic browser User-Agent instead of crawler signature
     user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   })
@@ -232,11 +227,18 @@ const NewCrawl = () => {
               <Typography gutterBottom>Max Pages</Typography>
               <TextField
                 type="number"
-                value={config.max_pages}
-                onChange={handleChange('max_pages')}
+                value={config.max_pages || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setConfig({
+                    ...config,
+                    max_pages: value === '' ? null : parseInt(value, 10)
+                  });
+                }}
+                placeholder="Unlimited"
                 inputProps={{ min: 1 }}
                 fullWidth
-                helperText="Maximum number of pages to crawl"
+                helperText={config.max_pages ? `Limit to ${config.max_pages} pages` : 'No limit - crawl entire site (recommended)'}
               />
             </Grid>
             

@@ -5,6 +5,7 @@ import logging
 import time
 import re
 import asyncio
+import random
 from urllib.parse import urljoin, urlparse
 from typing import Set, Dict, List, Optional, Tuple
 from datetime import datetime
@@ -16,6 +17,44 @@ from api.models import CrawlConfig, CrawlProgress
 from processor.extractor import ContentExtractor
 
 logger = logging.getLogger(__name__)
+
+class UserAgentGenerator:
+    """Generates appropriate user agents for different crawling scenarios."""
+    
+    DEFAULT_VOICEFORGE_UA = "VoiceForge-Crawler/1.0 (+https://voiceforge.ai/bot)"
+    
+    @staticmethod
+    def generate_user_agent(config: CrawlConfig) -> str:
+        """Generate user agent based on configuration."""
+        
+        if config.user_agent_mode == "custom" and config.custom_user_agent:
+            return config.custom_user_agent
+        
+        elif config.user_agent_mode == "stealth":
+            return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        
+        elif config.user_agent_mode == "default":
+            # Generate professional crawler user agent
+            base_ua = "VoiceForge-Crawler/1.0"
+            
+            # Add organization if provided
+            if config.organization_name:
+                base_ua += f" ({config.organization_name})"
+            
+            # Add contact info
+            contact_info = []
+            if config.contact_email:
+                contact_info.append(f"contact:{config.contact_email}")
+            
+            contact_info.append("info:https://voiceforge.ai/bot")
+            
+            if contact_info:
+                base_ua += f" [{'; '.join(contact_info)}]"
+            
+            return base_ua
+        
+        # Fallback to legacy user_agent field or default
+        return getattr(config, 'user_agent', UserAgentGenerator.DEFAULT_VOICEFORGE_UA)
 
 class PlaywrightCrawler:
     """Crawler implementation using Playwright for JavaScript rendering."""
@@ -47,9 +86,22 @@ class PlaywrightCrawler:
         return domain.rstrip('/')
     
     def _get_base_domain(self, url: str) -> str:
-        """Extract base domain from URL."""
+        """Extract base domain from URL, handling subdomains for crawling."""
         parsed = urlparse(url)
-        return f"{parsed.scheme}://{parsed.netloc}"
+        hostname = parsed.hostname or parsed.netloc
+        
+        # Remove port number if present
+        hostname = hostname.split(':')[0]
+        
+        # For buf.build and similar domains, we want to normalize subdomains
+        # to the root domain for crawling purposes
+        parts = hostname.split('.')
+        if len(parts) >= 2:
+            # Extract root domain (last 2 parts)
+            root_domain = '.'.join(parts[-2:])
+            return f"{parsed.scheme}://{root_domain}"
+        
+        return f"{parsed.scheme}://{hostname}"
     
     def _should_crawl_url(self, url: str) -> bool:
         """Determine if a URL should be crawled."""
@@ -120,26 +172,71 @@ class PlaywrightCrawler:
         self.running = False
     
     def crawl(self):
-        """Run the crawler."""
+        """Run the crawler with configurable user agent and enhanced capabilities."""
         self.running = True
+        
+        # Generate appropriate user agent based on configuration
+        user_agent = UserAgentGenerator.generate_user_agent(self.config)
+        
+        # 🔍 DEBUG: Log initial configuration
+        logger.warning(f"🚀 VOICEFORGE CRAWLER: Starting crawl for {self.domain}")
+        logger.warning(f"  User Agent: {user_agent}")
+        logger.warning(f"  User Agent Mode: {self.config.user_agent_mode}")
+        logger.warning(f"  max_pages: {self.config.max_pages}")
+        logger.warning(f"  max_depth: {self.config.max_depth}")
+        logger.warning(f"  delay: {self.config.delay}")
         
         # Start with the domain URL
         self.queue = [(self.domain, 0)]  # (url, depth)
         self.discovered_urls.add(self.domain)
         
         with sync_playwright() as self.playwright:
-            # Launch browser
-            self.browser = self.playwright.chromium.launch(
-                headless=True
-            )
+            # Choose browser launch mode based on user agent type
+            if self.config.user_agent_mode == "stealth":
+                # Use stealth mode for demo/testing purposes
+                browser_args = [
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=TranslateUI",
+                    "--disable-extensions",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox"
+                ]
+                
+                self.browser = self.playwright.chromium.launch(
+                    headless=True,
+                    args=browser_args
+                )
+                
+                context = self.browser.new_context(
+                    viewport={'width': 1366, 'height': 768},
+                    user_agent=user_agent,
+                    locale='en-US',
+                    timezone_id='America/New_York'
+                )
+            else:
+                # Standard crawler mode for legitimate crawling
+                self.browser = self.playwright.chromium.launch(headless=True)
+                
+                context = self.browser.new_context(
+                    user_agent=user_agent
+                )
             
             try:
                 # Process queue until empty or max pages reached
                 while self.queue and self.running:
+                    # 🔍 DEBUG: Log progress every 5 pages
+                    if len(self.visited_urls) % 5 == 0 and len(self.visited_urls) > 0:
+                        logger.warning(f"🔍 CRAWLER: Progress - Visited: {len(self.visited_urls)}, Queue: {len(self.queue)}")
+                    
                     # Check if max pages limit reached
                     if (self.config.max_pages is not None and 
                         len(self.visited_urls) >= self.config.max_pages):
-                        logger.info(f"Reached max pages limit: {self.config.max_pages}")
+                        logger.warning(f"🔍 CRAWLER: STOPPED - Reached max_pages limit!")
                         break
                     
                     # Get next URL from queue
@@ -157,19 +254,98 @@ class PlaywrightCrawler:
                     self.current_depth = max(self.current_depth, depth)
                     
                     # Visit URL
-                    logger.info(f"Crawling: {url} (depth: {depth})")
+                    logger.info(f"📄 Crawling: {url} (depth: {depth})")
                     
                     try:
                         # Create a new page for each request
-                        page = self.browser.new_page(
-                            user_agent=self.config.user_agent
-                        )
+                        page = context.new_page()
+                        
+                        # Set appropriate headers based on mode
+                        if self.config.user_agent_mode == "stealth":
+                            # Stealth mode headers for demo purposes
+                            page.set_extra_http_headers({
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                                "Accept-Language": "en-US,en;q=0.9",
+                                "Accept-Encoding": "gzip, deflate, br",
+                                "DNT": "1",
+                                "Connection": "keep-alive",
+                                "Upgrade-Insecure-Requests": "1",
+                                "Sec-Fetch-Dest": "document",
+                                "Sec-Fetch-Mode": "navigate",
+                                "Sec-Fetch-Site": "none" if depth == 0 else "same-origin",
+                                "Sec-Fetch-User": "?1" if depth == 0 else "?0",
+                                "Cache-Control": "max-age=0"
+                            })
+                            
+                            # Hide automation for demo purposes
+                            page.add_init_script("""
+                                // Hide webdriver property
+                                Object.defineProperty(navigator, 'webdriver', {
+                                    get: () => undefined
+                                });
+                                
+                                // Hide automation indicators
+                                delete window.__playwright;
+                                delete window.__pwInitScript;
+                                
+                                // Add realistic chrome object
+                                window.chrome = {
+                                    runtime: {}
+                                };
+                                
+                                // Realistic plugins
+                                Object.defineProperty(navigator, 'plugins', {
+                                    get: () => [1, 2, 3, 4, 5]
+                                });
+                            """)
+                        else:
+                            # Standard crawler headers for legitimate crawling
+                            page.set_extra_http_headers({
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                "Accept-Language": "en-US,en;q=0.5",
+                                "Accept-Encoding": "gzip, deflate",
+                                "Connection": "keep-alive"
+                            })
                         
                         # Set timeout
                         page.set_default_timeout(self.config.timeout * 1000)
                         
-                        # Go to URL
-                        response = page.goto(url)
+                        # Add delay for stealth mode or use configured delay
+                        if self.config.user_agent_mode == "stealth":
+                            human_delay = random.uniform(2.0, 5.0)
+                            time.sleep(human_delay)
+                        
+                        # Navigate to URL with retry logic for stealth mode
+                        response = None
+                        max_attempts = 3 if self.config.user_agent_mode == "stealth" else 1
+                        
+                        for attempt in range(max_attempts):
+                            try:
+                                wait_until = 'networkidle' if self.config.user_agent_mode == "stealth" else 'load'
+                                response = page.goto(url, wait_until=wait_until, timeout=30000)
+                                break
+                            except Exception as e:
+                                if attempt < max_attempts - 1:
+                                    logger.warning(f"Attempt {attempt + 1} failed for {url}: {str(e)}")
+                                    time.sleep(random.uniform(1, 3))
+                                else:
+                                    raise e
+                        
+                        if not response:
+                            logger.error(f"Failed to get response for {url}")
+                            page.close()
+                            continue
+                        
+                        # Check response status
+                        if response.status >= 400:
+                            logger.warning(f"HTTP {response.status} for {url}")
+                            if response.status == 403 or response.status == 429:
+                                logger.warning("🚨 Possible bot detection or rate limiting!")
+                                if self.config.user_agent_mode == "stealth":
+                                    time.sleep(random.uniform(10, 20))
+                            page.close()
+                            self.failed_urls.add(url)
+                            continue
                         
                         # Skip if not HTML
                         content_type = response.headers.get('content-type', '')
@@ -177,8 +353,38 @@ class PlaywrightCrawler:
                             page.close()
                             continue
                         
-                        # Wait for page to load
-                        page.wait_for_load_state('networkidle')
+                        # Additional page load handling for stealth mode
+                        if self.config.user_agent_mode == "stealth":
+                            try:
+                                # Simulate human scrolling behavior
+                                page.evaluate("""
+                                    new Promise((resolve) => {
+                                        let totalHeight = 0;
+                                        const distance = 100;
+                                        const timer = setInterval(() => {
+                                            const scrollHeight = document.body.scrollHeight;
+                                            window.scrollBy(0, distance);
+                                            totalHeight += distance;
+                                            
+                                            if(totalHeight >= scrollHeight){
+                                                clearInterval(timer);
+                                                resolve();
+                                            }
+                                        }, 100);
+                                    })
+                                """)
+                                
+                                # Small delay after scrolling
+                                time.sleep(random.uniform(0.5, 1.5))
+                                
+                            except Exception as e:
+                                logger.warning(f"Page load timeout for {url}: {str(e)}")
+                        else:
+                            # Standard page load for legitimate crawling
+                            try:
+                                page.wait_for_load_state('networkidle', timeout=15000)
+                            except:
+                                pass  # Continue if timeout
                         
                         # Get HTML content
                         html = page.content()
@@ -200,6 +406,7 @@ class PlaywrightCrawler:
                             content_data['extracted_at'] = datetime.now()
                             self.db.save_content(content_data, self.org_id)
                             self.content_extracted += 1
+                            logger.info(f"✅ Content extracted from {url}")
                         
                         # Extract links for further crawling
                         links = self._extract_links(html, url)
@@ -209,14 +416,24 @@ class PlaywrightCrawler:
                             if link not in self.visited_urls:
                                 self.queue.append((link, depth + 1))
                         
+                        # Shuffle queue for stealth mode to avoid predictable patterns
+                        if self.config.user_agent_mode == "stealth":
+                            random.shuffle(self.queue)
+                        
                         # Close page
                         page.close()
                         
-                        # Respect delay setting
-                        time.sleep(self.config.delay)
+                        # Enhanced delay with randomization for stealth mode
+                        if self.config.user_agent_mode == "stealth":
+                            base_delay = self.config.delay
+                            random_delay = base_delay + random.uniform(0.5, 2.0)
+                            time.sleep(random_delay)
+                        else:
+                            # Standard delay for legitimate crawling
+                            time.sleep(self.config.delay)
                         
                     except Exception as e:
-                        logger.error(f"Failed to crawl {url}: {str(e)}")
+                        logger.error(f"❌ Failed to crawl {url}: {str(e)}")
                         self.failed_urls.add(url)
                         
                         try:
@@ -224,10 +441,25 @@ class PlaywrightCrawler:
                             page.close()
                         except:
                             pass
+                        
+                        # Error delay
+                        if self.config.user_agent_mode == "stealth":
+                            time.sleep(random.uniform(5.0, 10.0))
+                        else:
+                            time.sleep(2.0)
             
             finally:
-                # Close browser
+                # Close context and browser
+                context.close()
                 self.browser.close()
+        
+        # 🔍 DEBUG: Final status
+        logger.warning(f"🎉 VOICEFORGE CRAWLER: Crawl completed - Final status:")
+        logger.warning(f"  Pages crawled: {len(self.visited_urls)}")
+        logger.warning(f"  Pages discovered: {len(self.discovered_urls)}")
+        logger.warning(f"  Pages failed: {len(self.failed_urls)}")
+        logger.warning(f"  Content extracted: {self.content_extracted}")
+        logger.warning(f"  User Agent Used: {user_agent}")
         
         logger.info(f"Crawl completed: {len(self.visited_urls)} pages crawled, "
                    f"{len(self.failed_urls)} failed, {self.content_extracted} content extracted")

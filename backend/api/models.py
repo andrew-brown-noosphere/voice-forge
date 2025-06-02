@@ -37,7 +37,15 @@ class CrawlConfig(BaseModel):
     follow_external_links: bool = Field(False, description="Whether to follow links to external domains")
     exclude_patterns: List[str] = Field(default_factory=list, description="URL patterns to exclude")
     include_patterns: List[str] = Field(default_factory=list, description="URL patterns to include (others will be excluded)")
-    user_agent: str = Field("VoiceForge Intelligencer (+https://voiceforge.voyant.io)", description="User agent string")
+    
+    # Enhanced user agent configuration for whitelisting
+    user_agent_mode: str = Field("default", description="User agent mode: default, custom, stealth")
+    custom_user_agent: Optional[str] = Field(None, description="Custom user agent string for whitelisting")
+    organization_name: Optional[str] = Field(None, description="Organization name for default user agent")
+    contact_email: Optional[str] = Field(None, description="Contact email for default user agent")
+    
+    # Legacy field for backward compatibility
+    user_agent: str = Field("VoiceForge-Crawler/1.0 (+https://voiceforge.ai/bot)", description="User agent string (deprecated, use user_agent_mode)")
 
 class CrawlRequest(BaseModel):
     """Request to start a new crawl job."""
@@ -69,6 +77,7 @@ class CrawlStatus(BaseModel):
     end_time: Optional[datetime] = Field(None, description="When the crawl ended")
     error: Optional[str] = Field(None, description="Error message if the crawl failed")
     config: CrawlConfig = Field(..., description="Configuration used for the crawl")
+    task_id: Optional[str] = Field(None, description="Celery task ID for background processing")
 
 class ContentMetadata(BaseModel):
     """Metadata for extracted content."""

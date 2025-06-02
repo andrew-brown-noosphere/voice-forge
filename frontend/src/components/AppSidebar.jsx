@@ -34,10 +34,10 @@ const menuItems = [
     ]
   },
   {
-    section: 'Crawling',
+    section: 'Content Analysis',
     items: [
-      { text: 'Recent Crawls', icon: <LanguageIcon />, path: '/crawls' },
-      { text: 'New Crawl', icon: <LayersIcon />, path: '/crawls/new' },
+      { text: 'Recent Analysis', icon: <LanguageIcon />, path: '/crawls' },
+      { text: 'New Analysis', icon: <LayersIcon />, path: '/crawls/new' },
     ]
   },
   {
