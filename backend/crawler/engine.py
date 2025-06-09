@@ -190,6 +190,11 @@ class PlaywrightCrawler:
         self.queue = [(self.domain, 0)]  # (url, depth)
         self.discovered_urls.add(self.domain)
         
+        # Add randomized initial delay to avoid detection patterns
+        initial_delay = random.uniform(1.0, 3.0)
+        logger.info(f"⏳ Initial delay: {initial_delay:.2f}s before starting crawl")
+        time.sleep(initial_delay)
+        
         with sync_playwright() as self.playwright:
             # Choose browser launch mode based on user agent type
             if self.config.user_agent_mode == "stealth":
@@ -423,14 +428,20 @@ class PlaywrightCrawler:
                         # Close page
                         page.close()
                         
-                        # Enhanced delay with randomization for stealth mode
+                        # Enhanced delay with randomization for all modes
+                        base_delay = self.config.delay
                         if self.config.user_agent_mode == "stealth":
-                            base_delay = self.config.delay
-                            random_delay = base_delay + random.uniform(0.5, 2.0)
-                            time.sleep(random_delay)
+                            # More aggressive randomization for stealth mode
+                            random_delay = base_delay + random.uniform(0.5, 3.0)
                         else:
-                            # Standard delay for legitimate crawling
-                            time.sleep(self.config.delay)
+                            # Standard randomization for legitimate crawling
+                            # Randomize delay between 50% and 150% of base delay
+                            min_delay = base_delay * 0.5
+                            max_delay = base_delay * 1.5
+                            random_delay = random.uniform(min_delay, max_delay)
+                        
+                        logger.debug(f"⏱️ Waiting {random_delay:.2f}s (base: {base_delay}s)")
+                        time.sleep(random_delay)
                         
                     except Exception as e:
                         logger.error(f"❌ Failed to crawl {url}: {str(e)}")
@@ -442,11 +453,14 @@ class PlaywrightCrawler:
                         except:
                             pass
                         
-                        # Error delay
+                        # Error delay with randomization
                         if self.config.user_agent_mode == "stealth":
-                            time.sleep(random.uniform(5.0, 10.0))
+                            error_delay = random.uniform(5.0, 15.0)
                         else:
-                            time.sleep(2.0)
+                            error_delay = random.uniform(1.0, 4.0)
+                        
+                        logger.debug(f"❌ Error delay: {error_delay:.2f}s")
+                        time.sleep(error_delay)
             
             finally:
                 # Close context and browser

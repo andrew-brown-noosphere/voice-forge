@@ -92,11 +92,43 @@ const ModernCrawlList = () => {
   // Handle crawl actions
   const handleDeleteCrawl = async (crawlId) => {
     try {
+      console.log('🗑️ Deleting crawl:', crawlId)
+      
+      // Show loading state for the specific crawl
+      setCrawls(prevCrawls => 
+        prevCrawls.map(crawl => 
+          crawl.id === crawlId || crawl.crawl_id === crawlId 
+            ? { ...crawl, deleting: true }
+            : crawl
+        )
+      )
+      
       await api.crawls.delete(crawlId)
-      await loadCrawls() // Refresh the list
+      console.log('✅ Delete API call completed')
+      
+      // Immediately remove from local state
+      setCrawls(prevCrawls => 
+        prevCrawls.filter(crawl => 
+          crawl.id !== crawlId && crawl.crawl_id !== crawlId
+        )
+      )
+      
+      console.log('🔄 Refreshing crawl list...')
+      // Also refresh from server to be sure
+      await loadCrawls()
+      
     } catch (err) {
-      console.error('Failed to delete crawl:', err)
+      console.error('❌ Failed to delete crawl:', err)
       setError(`Failed to delete crawl: ${err.message}`)
+      
+      // Remove loading state on error
+      setCrawls(prevCrawls => 
+        prevCrawls.map(crawl => 
+          crawl.id === crawlId || crawl.crawl_id === crawlId 
+            ? { ...crawl, deleting: false }
+            : crawl
+        )
+      )
     }
   }
   
@@ -545,7 +577,8 @@ const ModernCrawlList = () => {
         <MenuItem 
           onClick={() => {
             if (selectedCrawl) {
-              handleDeleteCrawl(selectedCrawl.crawl_id)
+              console.log('🗑️ Menu delete clicked for crawl:', selectedCrawl.id || selectedCrawl.crawl_id)
+              handleDeleteCrawl(selectedCrawl.id || selectedCrawl.crawl_id)
             }
             handleMenuClose()
           }}

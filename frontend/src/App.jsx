@@ -33,6 +33,22 @@ import ModernNewCrawl from './pages/ModernNewCrawl'
 import ModernSettings from './pages/ModernSettings'
 import ModernCrawlList from './pages/ModernCrawlList'
 import ModernContentGenerator from './pages/ModernContentGenerator'
+import EnhancedContentGenerator from './pages/EnhancedContentGenerator'
+import RedditSignals from './pages/RedditSignals'
+import Signals from './pages/Signals'
+import SignalSettings from './pages/SignalSettings'
+import SignalSettingsTest from './pages/SignalSettingsTest'
+
+import AIRedditSignals from './pages/AIRedditSignals'
+// Platform configuration pages
+import RedditConfig from './pages/signals/RedditConfig'
+import TwitterConfig from './pages/signals/TwitterConfig'
+import GitHubConfig from './pages/signals/GitHubConfig'
+import LinkedInConfig from './pages/signals/LinkedInConfig'
+// Signal scan configuration
+import SignalScan from './pages/SignalScan'
+import SignalScanConfig from './pages/SignalScanConfig'
+import SignalSources from './pages/SignalSources'
 
 // Get Clerk publishable key from environment
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -196,9 +212,20 @@ function AuthenticatedApp() {
               } />
               <Route path="content/:id" element={<ContentDetails />} />
               
+              {/* Signal Discovery routes */}
+              <Route path="signals" element={<Signals />} />
+              <Route path="signals/sources" element={<SignalSources />} />
+              <Route path="signals/scan" element={<SignalScan />} />
+              <Route path="signals/scan/config" element={<SignalScanConfig />} />
+              <Route path="reddit-signals" element={<RedditSignals />} />
+              <Route path="ai-reddit-signals" element={<AIRedditSignals />} />
+              
               {/* RAG routes */}
               <Route path="generator" element={
                 <ContentGenerator />
+              } />
+              <Route path="enhanced-generator" element={
+                <EnhancedContentGenerator />
               } />
               <Route path="templates" element={<TemplateList />} />
               <Route path="templates/new" element={<TemplateEditor />} />
@@ -214,6 +241,14 @@ function AuthenticatedApp() {
                   modernComponent={ModernSettings} 
                 />
               } />
+              <Route path="settings/signals" element={<SignalSettings />} />
+              
+              {/* Platform-specific configuration pages */}
+              <Route path="settings/signals/reddit" element={<RedditConfig />} />
+              <Route path="settings/signals/twitter" element={<TwitterConfig />} />
+              <Route path="settings/signals/github" element={<GitHubConfig />} />
+              <Route path="settings/signals/linkedin" element={<LinkedInConfig />} />
+              
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

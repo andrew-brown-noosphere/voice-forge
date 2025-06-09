@@ -20,8 +20,14 @@ import {
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
 import SettingsIcon from '@mui/icons-material/Settings'
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'
+import { useNavigate } from 'react-router-dom'
+import TestComponent from '../TestComponent'
 
 const Settings = () => {
+  INTENTIONAL_SYNTAX_ERROR_TO_TEST_IF_VITE_READS_THIS_FILE
+  const navigate = useNavigate()
+  // Signal automation feature added
   const [settings, setSettings] = useState({
     maxConcurrentCrawls: 4,
     defaultDelay: 1.0,
@@ -65,8 +71,9 @@ const Settings = () => {
 
   return (
     <Box>
+      <TestComponent />
       <Typography variant="h4" component="h1" gutterBottom>
-        Settings
+        Settings - Signal Discovery Added!
       </Typography>
 
       <Card sx={{ mb: 4 }}>
@@ -167,6 +174,30 @@ const Settings = () => {
               />
             </Grid>
           </Grid>
+        </CardContent>
+      </Card>
+
+      <Card sx={{ mb: 4 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            <TrendingUpIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+            Signal Discovery Settings
+          </Typography>
+          <Divider sx={{ mb: 3 }} />
+          
+          <Button
+            variant="outlined"
+            fullWidth
+            onClick={() => navigate('/settings/signals')}
+            sx={{ mb: 2 }}
+          >
+            Manage Signal Sources & Automation
+          </Button>
+          
+          <Typography variant="body2" color="textSecondary">
+            Configure automated signal discovery from Reddit, Twitter, GitHub, and LinkedIn.
+            Set up monitoring sources, keywords, and AI optimization.
+          </Typography>
         </CardContent>
       </Card>
 

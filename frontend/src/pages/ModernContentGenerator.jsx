@@ -19,7 +19,9 @@ import {
   AccordionDetails,
   Divider,
   Snackbar,
-  Alert
+  Alert,
+  Tab,
+  Tabs
 } from '@mui/material'
 import {
   AutoAwesome as AutoAwesomeIcon,
@@ -39,7 +41,8 @@ import {
   Tune as TuneIcon,
   Speed as SpeedIcon,
   Domain as DomainIcon,
-  Category as CategoryIcon
+  Category as CategoryIcon,
+  Lightbulb as LightbulbIcon
 } from '@mui/icons-material'
 
 // Modern components
@@ -54,6 +57,14 @@ import {
 
 // API service
 import { useApi } from '../hooks/useApi'
+
+// Intelligent prompt suggestions - conditional import with fallback
+let IntelligentPromptSuggestions = null
+try {
+  IntelligentPromptSuggestions = require('../components/IntelligentPromptSuggestions').default
+} catch (error) {
+  console.log('IntelligentPromptSuggestions component not available yet')
+}
 
 // Platform options with icons
 const platforms = [
@@ -99,6 +110,9 @@ const ModernContentGenerator = () => {
   const [sourceChunks, setSourceChunks] = useState([])
   const [showSources, setShowSources] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  
+  // Tab management for prompt input vs intelligent suggestions
+  const [inputTab, setInputTab] = useState(0) // 0 = manual input, 1 = intelligent suggestions
 
   // Fetch domains on component mount with retry logic
   useEffect(() => {
@@ -212,11 +226,47 @@ const ModernContentGenerator = () => {
     }
   }
 
+  // Handle intelligent prompt selection
+  const handlePromptSelect = (promptText, promptMeta) => {
+    console.log('📝 Selected intelligent prompt:', { promptText, promptMeta })
+    
+    setQuery(promptText)
+    
+    // Auto-fill platform and tone if provided
+    if (promptMeta?.platform && !platform) {
+      setPlatform(promptMeta.platform)
+    }
+    if (promptMeta?.tone && !tone) {
+      setTone(promptMeta.tone)
+    }
+    
+    // Switch to manual input tab to show the filled prompt
+    setInputTab(0)
+    
+    // Show success message
+    setSuccess(`Intelligent prompt selected! Category: ${promptMeta?.category || 'General'}`)
+  }
+
   const currentPlatform = platforms.find(p => p.value === platform) || {}
   const contentLength = generatedContent ? generatedContent.length : 0
   const characterLimit = currentPlatform.maxLength || 0
   const isOverLimit = characterLimit > 0 && contentLength > characterLimit
   const PlatformIcon = currentPlatform.icon
+
+  // Custom TabPanel component
+  const TabPanel = ({ children, value, index, ...other }) => {
+    return (
+      <div
+        role="tabpanel"
+        hidden={value !== index}
+        id={`prompt-tabpanel-${index}`}
+        aria-labelledby={`prompt-tab-${index}`}
+        {...other}
+      >
+        {value === index && children}
+      </div>
+    )
+  }
 
   return (
     <Box>
@@ -241,37 +291,131 @@ const ModernContentGenerator = () => {
         </Typography>
       </Box>
 
-      {/* Main Form */}
+      {/* Main Form with Intelligent Prompts */}
       <ModernCard sx={{ mb: 4 }} hover={false}>
         <CardContent sx={{ p: 4 }}>
-          <ModernSectionHeader
-            icon={EditIcon}
-            title="Content Creation"
-            description="Describe what you want to write and choose your platform"
-            color="primary"
-          />
-          
-          <Grid container spacing={4} sx={{ mt: 1 }}>
-            {/* Query Input */}
-            <Grid item xs={12}>
-              <ModernTextField
-                label="What would you like to write about?"
-                placeholder="E.g., 'Write a post about our new product features' or 'Create a customer support response for shipping questions'"
-                multiline
-                rows={4}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                icon={EditIcon}
-                required
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    fontSize: '1.1rem',
-                    lineHeight: 1.6
-                  }
-                }}
+          {/* Tab Headers */}
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+            <Tabs 
+              value={inputTab} 
+              onChange={(e, newValue) => setInputTab(newValue)}
+              aria-label="prompt input tabs"
+              sx={{
+                '& .MuiTab-root': {
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  fontSize: '1rem'
+                }
+              }}
+            >
+              <Tab 
+                icon={<EditIcon />} 
+                iconPosition="start"
+                label="Manual Input" 
+                id="prompt-tab-0"
+                aria-controls="prompt-tabpanel-0"
+                sx={{ minHeight: 64 }}
               />
-            </Grid>
+              <Tab 
+                icon={<LightbulbIcon />} 
+                iconPosition="start"
+                label="✨ Intelligent Suggestions" 
+                id="prompt-tab-1"
+                aria-controls="prompt-tabpanel-1"
+                sx={{ minHeight: 64 }}
+              />
+            </Tabs>
+          </Box>
+
+          {/* Manual Input Tab */}
+          <TabPanel value={inputTab} index={0}>
+            <ModernSectionHeader
+              icon={EditIcon}
+              title="Content Creation"
+              subtitle="Describe what you want to write and choose your platform"
+              color="primary"
+            />
             
+            <Grid container spacing={4} sx={{ mt: 1 }}>
+              {/* Query Input */}
+              <Grid item xs={12}>
+                <ModernTextField
+                  label="What would you like to write about?"
+                  placeholder="E.g., 'Write a post about our new product features' or try using our intelligent suggestions above!"
+                  multiline
+                  rows={4}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  icon={EditIcon}
+                  required
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      fontSize: '1.1rem',
+                      lineHeight: 1.6
+                    }
+                  }}
+                />
+                
+                {!query && (
+                  <Alert 
+                    severity="info" 
+                    sx={{ 
+                      mt: 2, 
+                      borderRadius: 2,
+                      '& .MuiAlert-message': {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1
+                      }
+                    }}
+                  >
+                    <LightbulbIcon sx={{ fontSize: 20 }} />
+                    <Typography variant="body2">
+                      <strong>Tip:</strong> Try the "✨ Intelligent Suggestions" tab above for AI-generated prompts based on your content!
+                    </Typography>
+                  </Alert>
+                )}
+              </Grid>
+            </Grid>
+          </TabPanel>
+
+          {/* Intelligent Suggestions Tab */}
+          <TabPanel value={inputTab} index={1}>
+            {IntelligentPromptSuggestions ? (
+              <IntelligentPromptSuggestions
+                onPromptSelect={handlePromptSelect}
+                selectedDomain={selectedDomain}
+                selectedPlatform={platform}
+                maxSuggestions={5}
+              />
+            ) : (
+              <Box sx={{ p: 3, textAlign: 'center' }}>
+                <Avatar sx={{ 
+                  bgcolor: alpha(theme.palette.primary.main, 0.1), 
+                  color: theme.palette.primary.main,
+                  width: 64,
+                  height: 64,
+                  mx: 'auto',
+                  mb: 2
+                }}>
+                  <LightbulbIcon sx={{ fontSize: 32 }} />
+                </Avatar>
+                <Typography variant="h6" color="textSecondary" sx={{ mb: 1 }}>
+                  ✨ Intelligent Suggestions Coming Soon!
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  This feature will analyze your content and suggest smart prompts based on your website content, business type, and target audience.
+                </Typography>
+              </Box>
+            )}
+          </TabPanel>
+        </CardContent>
+      </ModernCard>
+
+      {/* Platform and Tone Selection - Always Visible */}
+      <ModernCard sx={{ mb: 4 }} hover={false}>
+        <CardContent sx={{ p: 4 }}>
+          <Grid container spacing={4}>
             {/* Platform Selection */}
             <Grid item xs={12} md={6}>
               <Box sx={{ 
@@ -373,7 +517,7 @@ const ModernContentGenerator = () => {
             <ModernSectionHeader
               icon={TuneIcon}
               title="Advanced Options"
-              description="Fine-tune your content generation settings"
+              subtitle="Fine-tune your content generation settings"
               color="info"
             />
             <IconButton>

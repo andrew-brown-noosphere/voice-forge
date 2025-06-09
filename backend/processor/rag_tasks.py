@@ -7,12 +7,12 @@ operations that can run asynchronously across multiple workers.
 import logging
 from typing import Dict, Any, List, Optional
 from celery import current_task
-from celery_app import celery_app, RETRY_KWARGS
+from celery_app import celery_app
 from database.session import get_db_session
 
 logger = logging.getLogger(__name__)
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)
 def chunk_content_task(self, content_id: str, org_id: str):
     """
     Celery task to chunk content for RAG.
@@ -27,12 +27,6 @@ def chunk_content_task(self, content_id: str, org_id: str):
     try:
         logger.info(f"✂️ Starting content chunking for {content_id}")
         
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Chunking content", "progress": 0}
-        )
-        
         # Get database session
         db_session = get_db_session()
         
@@ -45,7 +39,7 @@ def chunk_content_task(self, content_id: str, org_id: str):
             result = rag_service.chunk_content_for_rag(
                 content_id=content_id,
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None
             )
             
             logger.info(f"✅ Content chunking completed for {content_id}")
@@ -55,17 +49,16 @@ def chunk_content_task(self, content_id: str, org_id: str):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Content chunking failed for {content_id}: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Content chunking failed for {content_id}: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Chunking failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "content_id": content_id
+        }
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)
 def generate_chunk_embeddings_task(self, content_id: str, org_id: str):
     """
     Celery task to generate embeddings for content chunks.
@@ -80,12 +73,6 @@ def generate_chunk_embeddings_task(self, content_id: str, org_id: str):
     try:
         logger.info(f"🧠 Starting chunk embedding generation for {content_id}")
         
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Generating chunk embeddings", "progress": 0}
-        )
-        
         # Get database session
         db_session = get_db_session()
         
@@ -98,7 +85,7 @@ def generate_chunk_embeddings_task(self, content_id: str, org_id: str):
             result = rag_service.generate_chunk_embeddings(
                 content_id=content_id,
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None
             )
             
             logger.info(f"✅ Chunk embedding generation completed for {content_id}")
@@ -108,17 +95,16 @@ def generate_chunk_embeddings_task(self, content_id: str, org_id: str):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Chunk embedding generation failed for {content_id}: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Chunk embedding generation failed for {content_id}: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Embedding generation failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "content_id": content_id
+        }
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)
 def process_crawl_for_rag_task(self, crawl_id: str, org_id: str):
     """
     Celery task to process an entire crawl for RAG.
@@ -133,12 +119,6 @@ def process_crawl_for_rag_task(self, crawl_id: str, org_id: str):
     try:
         logger.info(f"🤖 Starting RAG processing for crawl {crawl_id}")
         
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Processing crawl for RAG", "progress": 0}
-        )
-        
         # Get database session
         db_session = get_db_session()
         
@@ -151,7 +131,7 @@ def process_crawl_for_rag_task(self, crawl_id: str, org_id: str):
             result = rag_service.process_crawl_for_rag(
                 crawl_id=crawl_id,
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None
             )
             
             logger.info(f"✅ RAG processing completed for crawl {crawl_id}")
@@ -161,17 +141,16 @@ def process_crawl_for_rag_task(self, crawl_id: str, org_id: str):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ RAG processing failed for crawl {crawl_id}: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ RAG processing failed for crawl {crawl_id}: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"RAG processing failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "crawl_id": crawl_id
+        }
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)
 def optimize_vector_index_task(self, org_id: str):
     """
     Celery task to optimize vector indexes for better search performance.
@@ -185,12 +164,6 @@ def optimize_vector_index_task(self, org_id: str):
     try:
         logger.info(f"⚡ Starting vector index optimization for org {org_id}")
         
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Optimizing vector indexes", "progress": 0}
-        )
-        
         # Get database session
         db_session = get_db_session()
         
@@ -202,7 +175,7 @@ def optimize_vector_index_task(self, org_id: str):
             # Optimize indexes
             result = rag_service.optimize_vector_indexes(
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None
             )
             
             logger.info(f"✅ Vector index optimization completed for org {org_id}")
@@ -212,17 +185,16 @@ def optimize_vector_index_task(self, org_id: str):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Vector index optimization failed for org {org_id}: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Vector index optimization failed for org {org_id}: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Optimization failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "org_id": org_id
+        }
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)
 def generate_content_summary_task(self, content_ids: List[str], org_id: str):
     """
     Celery task to generate AI summaries for content.
@@ -237,12 +209,6 @@ def generate_content_summary_task(self, content_ids: List[str], org_id: str):
     try:
         logger.info(f"📝 Starting content summarization for {len(content_ids)} items")
         
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Generating content summaries", "progress": 0}
-        )
-        
         # Get database session
         db_session = get_db_session()
         
@@ -255,7 +221,7 @@ def generate_content_summary_task(self, content_ids: List[str], org_id: str):
             result = rag_service.generate_content_summaries(
                 content_ids=content_ids,
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None
             )
             
             logger.info(f"✅ Content summarization completed for {len(content_ids)} items")
@@ -265,15 +231,14 @@ def generate_content_summary_task(self, content_ids: List[str], org_id: str):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Content summarization failed: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Content summarization failed: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Summarization failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "total": len(content_ids)
+        }
 
 @celery_app.task(bind=True)
 def rag_health_check_task(self):
@@ -285,11 +250,6 @@ def rag_health_check_task(self):
     """
     try:
         logger.info("🔍 Running RAG health check")
-        
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Checking RAG services", "progress": 50}
-        )
         
         # Get database session
         db_session = get_db_session()
@@ -315,5 +275,10 @@ def rag_health_check_task(self):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ RAG health check failed: {str(exc)}")
-        raise exc
+        error_msg = str(exc)
+        logger.error(f"❌ RAG health check failed: {error_msg}", exc_info=True)
+        
+        return {
+            "status": "failed",
+            "error": error_msg
+        }

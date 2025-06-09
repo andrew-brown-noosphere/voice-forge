@@ -37,6 +37,11 @@ from api.rag_endpoints import rag_router
 from api.enhanced_rag_endpoints import enhanced_rag_router
 from api.analytics import router as analytics_router
 from api.word_cloud import router as word_cloud_router
+from api.reddit_signals import router as reddit_signals_router
+from api.signals import router as signals_router
+from api.prompt_generation import prompt_router
+from api.gypsum import router as gypsum_router
+from api.content_extraction import router as content_extraction_router
 
 # Configure logging to reduce spam
 logging.basicConfig(
@@ -74,6 +79,11 @@ app.include_router(rag_router)
 app.include_router(enhanced_rag_router)
 app.include_router(analytics_router)
 app.include_router(word_cloud_router)
+app.include_router(reddit_signals_router)
+app.include_router(signals_router)
+app.include_router(prompt_router)
+app.include_router(gypsum_router)
+app.include_router(content_extraction_router)
 
 # Mount static files (if needed)
 # app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -82,6 +92,87 @@ app.include_router(word_cloud_router)
 async def root():
     """Root endpoint to check if the API is running."""
     return {"status": "VoiceForge API is running with automated RAG", "version": "0.2.0"}
+
+@app.get("/debug/content-analysis")
+async def debug_content_analysis(
+    current_user: AuthUser = Depends(get_current_user_with_org),
+    db = Depends(get_db),
+):
+    """Debug endpoint to analyze content discovery for signals"""
+    try:
+        org_id = get_org_id_from_user(current_user)
+        
+        # Check total content count
+        total_content = db.get_content_count(org_id)
+        
+        # Check content types that actually exist
+        actual_content_types = db.get_content_types_for_org(org_id)
+        
+        # Get sample content (any type)
+        sample_content = db.search_content_simple(org_id, limit=10)
+        
+        # Check recent crawls
+        recent_crawls = db.get_recent_crawls(org_id, limit=5)
+        
+        # Test the exact same query that ContentDrivenSignalAI uses
+        signal_ai_query = {
+            'org_id': org_id,
+            'content_types': ['landing_page', 'product_description', 'blog_post', 'about_page', 'feature_page'],
+            'limit': 100,
+            'sort_by': 'relevance',
+            'min_length': 100,
+            'include_metadata': True
+        }
+        
+        signal_ai_results = db.search_content(signal_ai_query)
+        
+        # Test broader query
+        broad_query = {
+            'org_id': org_id,
+            'limit': 10,
+            'include_metadata': True
+        }
+        
+        broad_results = db.search_content(broad_query)
+        
+        return {
+            "org_id": org_id,
+            "diagnosis": {
+                "total_content_pieces": total_content,
+                "actual_content_types_in_db": actual_content_types,
+                "signal_ai_query_results": len(signal_ai_results),
+                "broad_query_results": len(broad_results)
+            },
+            "sample_content": [
+                {
+                    "id": c.get("id"),
+                    "title": c.get("title", "")[:100],
+                    "content_type": c.get("content_type"),
+                    "domain": c.get("domain"),
+                    "text_length": c.get("text_length", 0),
+                    "text_preview": c.get("text_preview", "")[:150]
+                }
+                for c in sample_content
+            ],
+            "recent_crawls": [
+                {
+                    "crawl_id": c.get("crawl_id"),
+                    "domain": c.get("domain"),
+                    "status": c.get("status"),
+                    "pages_found": c.get("pages_found", 0),
+                    "start_time": c.get("start_time")
+                }
+                for c in recent_crawls
+            ],
+            "signal_ai_query_tested": signal_ai_query,
+            "recommendations": [
+                f"Your content is stored as types: {actual_content_types}" if actual_content_types else "No content types found",
+                f"Signal AI expects: ['landing_page', 'product_description', 'blog_post', 'about_page', 'feature_page']",
+                "Mismatch detected - need to map actual types to expected types" if actual_content_types and not any(t in ['landing_page', 'product_description', 'blog_post', 'about_page', 'feature_page'] for t in actual_content_types) else "Content types look compatible"
+            ]
+        }
+    except Exception as e:
+        return {"error": str(e), "org_id": org_id}
 
 @app.get("/auth/me")
 async def get_current_user_info(

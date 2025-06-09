@@ -25,6 +25,10 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import FormatQuoteIcon from '@mui/icons-material/FormatQuote'
 import DesignServicesIcon from '@mui/icons-material/DesignServices'
 import LayersIcon from '@mui/icons-material/Layers'
+import PersonIcon from '@mui/icons-material/Person'
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'
+import SourceIcon from '@mui/icons-material/Source'
+import ScannerIcon from '@mui/icons-material/Scanner'
 
 const drawerWidth = 260
 
@@ -44,9 +48,18 @@ const menuItems = [
     ]
   },
   {
+    section: 'Signal Discovery',
+    items: [
+      { text: 'Social Signals', icon: <TrendingUpIcon />, path: '/signals' },
+      { text: 'Signal Sources', icon: <SourceIcon />, path: '/signals/sources' },
+      { text: 'Discovery Scan', icon: <ScannerIcon />, path: '/signals/scan' },
+    ]
+  },
+  {
     section: 'Content Generation',
     items: [
       { text: 'Content Generator', icon: <AutoAwesomeIcon />, path: '/generator' },
+      { text: 'Persona-Aware Generator', icon: <PersonIcon />, path: '/enhanced-generator' },
       { text: 'Templates', icon: <DesignServicesIcon />, path: '/templates' },
       { text: 'Generated Content', icon: <FormatQuoteIcon />, path: '/generated' },
     ]

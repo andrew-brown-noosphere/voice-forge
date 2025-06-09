@@ -116,6 +116,50 @@ const apiService = {
     const response = await api.post('/templates/search', params)
     return response.data
   },
+
+  // Reddit Signal operations
+  discoverRedditSignals: async (subreddits, keywords, timeFilter = 'week', maxPostsPerSubreddit = 50, relevanceThreshold = 0.6) => {
+    const params = {
+      subreddits,
+      keywords,
+      time_filter: timeFilter,
+      max_posts_per_subreddit: maxPostsPerSubreddit,
+      relevance_threshold: relevanceThreshold
+    }
+    const response = await api.post('/reddit-signals/discover', params)
+    return response.data
+  },
+
+  generateSignalResponse: async (signalId, platform = 'reddit', tone = 'professional', responseType = 'comment_reply', includeContext = true) => {
+    const params = {
+      signal_id: signalId,
+      platform,
+      tone,
+      response_type: responseType,
+      include_context: includeContext
+    }
+    const response = await api.post('/reddit-signals/generate-response', params)
+    return response.data
+  },
+
+  listRedditSignals: async (limit = 20, offset = 0, signalType = null, subreddit = null) => {
+    const params = new URLSearchParams({ limit, offset })
+    if (signalType) params.append('signal_type', signalType)
+    if (subreddit) params.append('subreddit', subreddit)
+    
+    const response = await api.get(`/reddit-signals/signals?${params}`)
+    return response.data
+  },
+
+  getRedditSignal: async (signalId) => {
+    const response = await api.get(`/reddit-signals/signals/${signalId}`)
+    return response.data
+  },
+
+  checkRedditSignalsHealth: async () => {
+    const response = await api.get('/reddit-signals/health')
+    return response.data
+  },
 }
 
 export default apiService

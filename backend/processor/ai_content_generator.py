@@ -14,27 +14,26 @@ class AIContentGenerator:
     """
     AI-powered content generator using OpenAI GPT for intelligent content creation
     """
-    
+
     def __init__(self):
         """Initialize the AI content generator"""
         self.client = None
         self._setup_openai()
-    
+
     def _setup_openai(self):
         """Setup OpenAI client"""
         api_key = os.environ.get('OPENAI_API_KEY')
         if not api_key:
             logger.error("OPENAI_API_KEY not found in environment variables")
             return
-        
+
         try:
             # Initialize OpenAI client
-            openai.api_key = api_key
             self.client = openai
             logger.info("OpenAI client initialized successfully")
         except Exception as e:
             logger.error(f"Failed to setup OpenAI client: {e}")
-    
+
     def _get_platform_constraints(self, platform: str) -> Dict[str, Any]:
         """Get platform-specific constraints and guidelines"""
         constraints = {
@@ -79,13 +78,13 @@ class AIContentGenerator:
                 'format': 'Helpful and solution-focused. Address concerns directly.'
             }
         }
-        
+
         return constraints.get(platform, {
             'max_length': 2000,
             'style': 'clear, informative',
             'format': 'Clear and well-structured content.'
         })
-    
+
     def _build_prompt(
         self, 
         query: str, 
@@ -94,19 +93,19 @@ class AIContentGenerator:
         chunks: List[Dict[str, Any]]
     ) -> str:
         """Build a comprehensive prompt for the AI"""
-        
+
         # Get platform constraints
         constraints = self._get_platform_constraints(platform)
-        
+
         # Extract relevant content from chunks
         context_content = []
         for i, chunk in enumerate(chunks[:5], 1):  # Use top 5 chunks
             similarity = chunk.get('similarity', 0)
             text = chunk.get('text', '')[:500]  # Limit chunk length
             context_content.append(f"Source {i} (relevance: {similarity:.2f}):\n{text}")
-        
+
         context = "\n\n".join(context_content)
-        
+
         # Build the prompt
         prompt = f"""You are a world-class content creator and copywriter specializing in {platform} content. You create engaging, persuasive content that drives action.
 
@@ -136,9 +135,9 @@ WRITING INSTRUCTIONS:
 12. Make every word count - be concise but impactful
 
 Write exceptional {platform} content now:"""
-        
+
         return prompt
-    
+
     def generate_content(
         self,
         query: str,
@@ -158,7 +157,7 @@ Write exceptional {platform} content now:"""
         Returns:
             Generated content with metadata
         """
-        
+
         if not self.client:
             logger.error("OpenAI client not available")
             return {
@@ -172,7 +171,7 @@ Write exceptional {platform} content now:"""
                     "error": "openai_not_configured"
                 }
             }
-        
+
         if not chunks:
             return {
                 "text": f"I couldn't find relevant information to create content about '{query}'. Please try a different topic or ensure your content has been processed.",
@@ -185,14 +184,14 @@ Write exceptional {platform} content now:"""
                     "error": "no_source_content"
                 }
             }
-        
+
         try:
             # Build the prompt
             prompt = self._build_prompt(query, platform, tone, chunks)
-            
+
             logger.info(f"Generating AI content for query: {query}")
             logger.info(f"Using {len(chunks)} source chunks")
-            
+
             # Call OpenAI API with optimized settings for better writing
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",  # Better quality than gpt-3.5-turbo
@@ -212,18 +211,18 @@ Write exceptional {platform} content now:"""
                 presence_penalty=0.1,  # Encourage diverse language
                 frequency_penalty=0.1   # Reduce repetition
             )
-            
+
             generated_text = response.choices[0].message.content.strip()
-            
+
             # Get platform constraints for validation
             constraints = self._get_platform_constraints(platform)
-            
+
             # Check length and provide feedback
             if len(generated_text) > constraints['max_length']:
                 logger.info(f"Content generated for {platform}: {len(generated_text)} chars (exceeds {constraints['max_length']} limit by {len(generated_text) - constraints['max_length']} chars - consider editing)")
             else:
                 logger.info(f"Content generated for {platform}: {len(generated_text)} chars (within {constraints['max_length']} limit)")
-            
+
             # Prepare source chunks for response
             source_chunks = [
                 {
@@ -234,7 +233,7 @@ Write exceptional {platform} content now:"""
                 }
                 for chunk in chunks
             ]
-            
+
             result = {
                 "text": generated_text,
                 "source_chunks": source_chunks,
@@ -249,10 +248,10 @@ Write exceptional {platform} content now:"""
                     "chunks_used": len(chunks)
                 }
             }
-            
+
             logger.info(f"Successfully generated {len(generated_text)} character content for {platform}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Failed to generate AI content: {str(e)}")
             return {

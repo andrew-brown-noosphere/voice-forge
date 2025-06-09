@@ -7,13 +7,13 @@ operations that can run asynchronously across multiple workers.
 import logging
 from typing import Dict, Any
 from celery import current_task
-from celery_app import celery_app, RETRY_KWARGS
+from celery_app import celery_app  # Remove RETRY_KWARGS import
 from crawler.service import CrawlerService
 from database.session import get_db_session
 
 logger = logging.getLogger(__name__)
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)  # Remove RETRY_KWARGS to avoid serialization issues
 def crawl_website_task(self, crawl_id: str, domain: str, config: Dict[str, Any], org_id: str):
     """
     Celery task to crawl a website.
@@ -29,12 +29,6 @@ def crawl_website_task(self, crawl_id: str, domain: str, config: Dict[str, Any],
     """
     try:
         logger.info(f"🚀 Starting crawl task for {domain} (ID: {crawl_id})")
-        
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Initializing crawler", "progress": 0}
-        )
         
         # Get database session and wrap it
         db_session = get_db_session()
@@ -53,7 +47,7 @@ def crawl_website_task(self, crawl_id: str, domain: str, config: Dict[str, Any],
                 domain=domain,
                 config=config,
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None  # Disable callback to avoid serialization issues
             )
             
             logger.info(f"✅ Crawl task completed for {domain} (ID: {crawl_id})")
@@ -63,17 +57,17 @@ def crawl_website_task(self, crawl_id: str, domain: str, config: Dict[str, Any],
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Crawl task failed for {domain} (ID: {crawl_id}): {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Crawl task failed for {domain} (ID: {crawl_id}): {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Crawl failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        # Simple error return instead of complex state updates
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "crawl_id": crawl_id
+        }
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)  # Remove RETRY_KWARGS
 def process_crawled_content_task(self, crawl_id: str, org_id: str):
     """
     Celery task to process crawled content for RAG.
@@ -87,12 +81,6 @@ def process_crawled_content_task(self, crawl_id: str, org_id: str):
     """
     try:
         logger.info(f"🔄 Starting content processing task for crawl {crawl_id}")
-        
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Processing content for RAG", "progress": 0}
-        )
         
         # Get database session and wrap it
         db_session = get_db_session()
@@ -112,7 +100,7 @@ def process_crawled_content_task(self, crawl_id: str, org_id: str):
             result = processor_service.process_crawl_for_rag(
                 crawl_id=crawl_id,
                 org_id=org_id,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None  # Remove problematic callback
             )
             
             logger.info(f"✅ Content processing completed for crawl {crawl_id}")
@@ -122,17 +110,16 @@ def process_crawled_content_task(self, crawl_id: str, org_id: str):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Content processing failed for crawl {crawl_id}: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Content processing failed for crawl {crawl_id}: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Processing failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg,
+            "crawl_id": crawl_id
+        }
 
-@celery_app.task(bind=True, **RETRY_KWARGS)
+@celery_app.task(bind=True)  # Remove RETRY_KWARGS
 def cleanup_old_crawls_task(self, days_old: int = 30):
     """
     Celery task to clean up old crawl data.
@@ -145,12 +132,6 @@ def cleanup_old_crawls_task(self, days_old: int = 30):
     """
     try:
         logger.info(f"🧹 Starting cleanup task for crawls older than {days_old} days")
-        
-        # Update task state
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Cleaning up old crawls", "progress": 0}
-        )
         
         # Get database session and wrap it
         db_session = get_db_session()
@@ -166,7 +147,7 @@ def cleanup_old_crawls_task(self, days_old: int = 30):
             # Perform cleanup
             result = crawler_service.cleanup_old_crawls(
                 days_old=days_old,
-                task_callback=lambda state, meta: current_task.update_state(state=state, meta=meta)
+                task_callback=None  # Remove problematic callback
             )
             
             logger.info(f"✅ Cleanup completed: {result}")
@@ -176,15 +157,13 @@ def cleanup_old_crawls_task(self, days_old: int = 30):
             db_session.close()
             
     except Exception as exc:
-        logger.error(f"❌ Cleanup task failed: {str(exc)}")
+        error_msg = str(exc)
+        logger.error(f"❌ Cleanup task failed: {error_msg}", exc_info=True)
         
-        # Update task state to failed
-        current_task.update_state(
-            state="FAILURE",
-            meta={"status": f"Cleanup failed: {str(exc)}", "error": str(exc)}
-        )
-        
-        raise exc
+        return {
+            "status": "failed",
+            "error": error_msg
+        }
 
 @celery_app.task(bind=True)
 def health_check_task(self):
@@ -196,11 +175,6 @@ def health_check_task(self):
     """
     try:
         logger.info("🔍 Running Celery health check")
-        
-        current_task.update_state(
-            state="PROGRESS",
-            meta={"status": "Running health check", "progress": 50}
-        )
         
         import time
         time.sleep(1)  # Simulate some work

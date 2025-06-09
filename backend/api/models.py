@@ -151,6 +151,12 @@ class ContentPlatform(str, Enum):
     WEBSITE = "website"
     CUSTOMER_SUPPORT = "customer_support"
 
+class FunnelStage(str, Enum):
+    """Sales funnel stages for content targeting."""
+    TOFU = "tofu"  # Top of Funnel - Awareness
+    MOFU = "mofu"  # Middle of Funnel - Consideration
+    BOFU = "bofu"  # Bottom of Funnel - Decision
+
 class GenerateContentRequest(BaseModel):
     """Request to generate content using RAG."""
     query: str = Field(..., description="Question or topic for content generation")

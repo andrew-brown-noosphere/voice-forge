@@ -39,11 +39,21 @@ export function useApi() {
 
       // Handle response
       if (response.ok) {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          return await response.json();
+        // Check if there's any content to parse
+        const contentLength = response.headers.get('content-length');
+        const hasContent = contentLength && parseInt(contentLength) > 0;
+        
+        if (hasContent) {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            return await response.json();
+          } else {
+            return await response.text();
+          }
+        } else {
+          // Empty response (common for DELETE operations)
+          return { success: true, status: response.status };
         }
-        return response;
       } else {
         const errorText = await response.text();
         
@@ -180,6 +190,165 @@ export function useApi() {
       }),
       get: (templateId) => makeRequest(`/templates/${templateId}`),
       create: (templateData) => makeRequest('/templates', { method: 'POST', body: JSON.stringify(templateData) }),
+    },
+
+    // Reddit Signal operations
+    redditSignals: {
+      discover: (subreddits, keywords, timeFilter = 'week', maxPostsPerSubreddit = 50, relevanceThreshold = 0.6) => makeRequest('/reddit-signals/discover', {
+        method: 'POST',
+        body: JSON.stringify({
+          subreddits,
+          keywords,
+          time_filter: timeFilter,
+          max_posts_per_subreddit: maxPostsPerSubreddit,
+          relevance_threshold: relevanceThreshold
+        })
+      }),
+      list: (limit = 20, offset = 0, signalType = null, subreddit = null) => {
+        const params = new URLSearchParams({ limit, offset })
+        if (signalType) params.append('signal_type', signalType)
+        if (subreddit) params.append('subreddit', subreddit)
+        return makeRequest(`/reddit-signals/signals?${params}`)
+      },
+      get: (signalId) => makeRequest(`/reddit-signals/signals/${signalId}`),
+      generateResponse: (signalId, platform = 'reddit', tone = 'professional', responseType = 'comment_reply', includeContext = true) => makeRequest('/reddit-signals/generate-response', {
+        method: 'POST',
+        body: JSON.stringify({
+          signal_id: signalId,
+          platform,
+          tone,
+          response_type: responseType,
+          include_context: includeContext
+        })
+      }),
+      health: () => makeRequest('/reddit-signals/health'),
+    },
+
+    // Abstracted Signals operations (multi-platform)
+    signals: {
+      discover: (discoveryRequest) => makeRequest('/signals/discover', {
+        method: 'POST',
+        body: JSON.stringify(discoveryRequest)
+      }),
+      list: (params = {}) => {
+        const searchParams = new URLSearchParams()
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== null && value !== undefined) {
+            searchParams.append(key, value)
+          }
+        })
+        return makeRequest(`/signals/list?${searchParams}`)
+      },
+      get: (signalId) => makeRequest(`/signals/${signalId}`),
+      generateResponse: (responseRequest) => makeRequest('/signals/generate-response', {
+        method: 'POST',
+        body: JSON.stringify(responseRequest)
+      }),
+      getSupportedPlatforms: () => makeRequest('/signals/platforms/supported'),
+      health: () => makeRequest('/signals/health'),
+      
+      // Signal Source Management
+      getSources: () => makeRequest('/signals/sources'),
+      createSource: (sourceData) => makeRequest('/signals/sources', {
+        method: 'POST',
+        body: JSON.stringify(sourceData)
+      }),
+      scanSource: (sourceId) => makeRequest(`/signals/sources/${sourceId}/scan`, {
+        method: 'POST'
+      }),
+      updateSource: (sourceId, updates) => makeRequest(`/signals/sources/${sourceId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      }),
+      deleteSource: (sourceId) => makeRequest(`/signals/sources/${sourceId}`, {
+        method: 'DELETE'
+      }),
+      aiGuidedSetup: (setupData) => makeRequest('/signals/sources/ai-setup', {
+        method: 'POST',
+        body: JSON.stringify(setupData)
+      }),
+      getRecommendations: (sourceId) => makeRequest(`/signals/sources/${sourceId}/recommendations`),
+      applyRecommendation: (sourceId, recId) => makeRequest(`/signals/sources/${sourceId}/recommendations/${recId}/apply`, {
+        method: 'POST'
+      }),
+      
+      // Content analysis and strategy
+      getAnalysis: () => makeRequest('/signals/analysis'),
+      generateStrategy: (strategyRequest) => makeRequest('/signals/strategy', {
+        method: 'POST',
+        body: JSON.stringify(strategyRequest)
+      })
+    },
+
+    // Platform-specific methods
+    platforms: {
+      // Get platform status and configuration
+      getStatus: (platform) => makeRequest(`/signals/platforms/${platform}/status`),
+      
+      // Configure platform credentials and settings
+      configure: (platform, config) => makeRequest(`/signals/platforms/${platform}/configure`, {
+        method: 'POST',
+        body: JSON.stringify(config)
+      }),
+      
+      // Test platform connection
+      testConnection: (platform) => makeRequest(`/signals/platforms/${platform}/test-connection`, {
+        method: 'POST'
+      }),
+      
+      // Get platform-specific metrics
+      getMetrics: (platform, timeframe = '24h') => makeRequest(`/signals/platforms/${platform}/metrics?timeframe=${timeframe}`),
+      
+      // Get platform activity/logs
+      getActivity: (platform, limit = 50) => makeRequest(`/signals/platforms/${platform}/activity?limit=${limit}`)
+    },
+
+    // Gypsum Persona operations
+    gypsum: {
+      getPersonas: () => makeRequest('/gypsum/personas'),
+      getPersona: (personaId) => makeRequest(`/gypsum/personas/${personaId}`),
+      createPersona: (personaData) => makeRequest('/gypsum/personas', {
+        method: 'POST',
+        body: JSON.stringify(personaData)
+      }),
+      updatePersona: (personaId, updates) => makeRequest(`/gypsum/personas/${personaId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      }),
+      deletePersona: (personaId) => makeRequest(`/gypsum/personas/${personaId}`, {
+        method: 'DELETE'
+      })
+    },
+
+    // Intelligent Prompt Generation operations
+    prompts: {
+      generate: (domain, platform, maxPrompts = 1, focusAreas, personaId, includeMessagingFramework = true, funnelStage, cacheBuster = null) => {
+        // Build request body, filtering out null/undefined values
+        const body = {
+          max_prompts: maxPrompts,
+          include_messaging_framework: includeMessagingFramework
+        }
+        
+        // Only include non-null values
+        if (domain) body.domain = domain
+        if (platform) body.platform = platform
+        if (focusAreas) body.focus_areas = focusAreas
+        if (personaId) body.persona_id = personaId
+        if (funnelStage) body.funnel_stage = funnelStage
+        if (cacheBuster) body.timestamp = cacheBuster
+        
+        return makeRequest('/api/prompts/generate', {
+          method: 'POST',
+          body: JSON.stringify(body)
+        })
+      },
+      getSample: (businessType, personaRole) => {
+        const params = new URLSearchParams()
+        if (businessType) params.append('business_type', businessType)
+        if (personaRole) params.append('persona_role', personaRole)
+        return makeRequest(`/api/prompts/sample?${params}`)
+      },
+      health: () => makeRequest('/api/prompts/health')
     },
   };
 }

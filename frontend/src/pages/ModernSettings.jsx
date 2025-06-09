@@ -34,7 +34,8 @@ import {
   Web as WebIcon,
   Palette as PaletteIcon,
   Api as ApiIcon,
-  RestoreOutlined as RestoreIcon
+  RestoreOutlined as RestoreIcon,
+  TrendingUp as TrendingUpIcon
 } from '@mui/icons-material'
 
 // Modern components
@@ -47,9 +48,11 @@ import {
   ModernAlert,
   ModernSectionHeader
 } from '../components/ModernFormComponents'
+import { useNavigate } from 'react-router-dom'
 
 const ModernSettings = () => {
   const theme = useTheme()
+  const navigate = useNavigate()
   const [settings, setSettings] = useState({
     maxConcurrentCrawls: 4,
     defaultDelay: 1.0,
@@ -341,6 +344,50 @@ const ModernSettings = () => {
               </Box>
             </Grid>
           </Grid>
+        </CardContent>
+      </ModernCard>
+      
+      {/* Signal Discovery Settings */}
+      <ModernCard sx={{ mb: 4 }} hover={false}>
+        <CardContent sx={{ p: 4 }}>
+          <ModernSectionHeader
+            icon={TrendingUpIcon}
+            title="Signal Discovery Settings"
+            description="Configure automated signal discovery from Reddit, Twitter, GitHub, and LinkedIn"
+          />
+          
+          <Box sx={{ 
+            p: 3, 
+            borderRadius: 3, 
+            background: alpha(theme.palette.primary.main, 0.05),
+            border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+            mt: 2
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+              <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1), color: theme.palette.primary.main }}>
+                <TrendingUpIcon />
+              </Avatar>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                AI-Powered Signal Monitoring
+              </Typography>
+            </Box>
+            
+            <ModernButton
+              variant="contained"
+              icon={TrendingUpIcon}
+              onClick={() => navigate('/settings/signals')}
+              gradient={true}
+              sx={{ mb: 2 }}
+              fullWidth
+            >
+              Manage Signal Sources & Automation
+            </ModernButton>
+            
+            <Typography variant="body2" color="textSecondary">
+              Set up automated monitoring for Reddit discussions, Twitter mentions, GitHub issues, and LinkedIn posts. 
+              Use AI to discover the best sources and keywords for your business.
+            </Typography>
+          </Box>
         </CardContent>
       </ModernCard>
       

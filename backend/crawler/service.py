@@ -2,6 +2,7 @@
 Crawler service implementation.
 Enhanced with Celery distributed task processing and automated RAG optimization.
 """
+import os
 import logging
 import asyncio
 import time
@@ -10,9 +11,23 @@ from typing import Dict, List, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from crawler.engine import PlaywrightCrawler
+from crawler.scrapingbee_engine import ScrapingBeeCrawler
 from api.models import CrawlRequest, CrawlStatus, CrawlState, CrawlConfig, CrawlProgress
 
 logger = logging.getLogger(__name__)
+
+# Try to import Firecrawl (might fail due to Pydantic conflict)
+try:
+    from crawler.firecrawl_engine import FirecrawlCrawler
+    FIRECRAWL_AVAILABLE = True
+    logger.info("✅ Firecrawl imported successfully")
+except Exception as e:
+    logger.warning(f"⚠️ Firecrawl not available: {e}")
+    FIRECRAWL_AVAILABLE = False
+    # Create a dummy class to prevent import errors
+    class FirecrawlCrawler:
+        def __init__(self, *args, **kwargs):
+            raise ValueError("Firecrawl is not available due to dependency conflicts")
 
 class CrawlerService:
     """Service for managing website crawls with Celery task queue integration."""
@@ -131,14 +146,36 @@ class CrawlerService:
             logger.warning(f"  config.delay: {config.delay}")
             logger.warning(f"  config type: {type(config)}")
             
-            # Initialize crawler
-            crawler = PlaywrightCrawler(
-                domain=domain,
-                config=config,
-                db=self.db,
-                crawl_id=crawl_id,
-                org_id=org_id
-            )
+            # Choose crawler engine based on environment and availability
+            crawler_engine = os.getenv('CRAWLER_ENGINE', 'firecrawl').lower()  # Default to Firecrawl
+            
+            if crawler_engine == 'firecrawl' and FIRECRAWL_AVAILABLE:
+                logger.info(f"🔥 Using Firecrawl engine for {crawl_id}")
+                crawler = FirecrawlCrawler(
+                    domain=domain,
+                    config=config,
+                    db=self.db,
+                    crawl_id=crawl_id,
+                    org_id=org_id
+                )
+            elif crawler_engine == 'scrapingbee' and os.getenv('SCRAPINGBEE_API_KEY'):
+                logger.info(f"🐝 Using ScrapingBee engine for {crawl_id}")
+                crawler = ScrapingBeeCrawler(
+                    domain=domain,
+                    config=config,
+                    db=self.db,
+                    crawl_id=crawl_id,
+                    org_id=org_id
+                )
+            else:
+                logger.info(f"🕷️ Using Playwright engine for {crawl_id}")
+                crawler = PlaywrightCrawler(
+                    domain=domain,
+                    config=config,
+                    db=self.db,
+                    crawl_id=crawl_id,
+                    org_id=org_id
+                )
             
             # Store crawler reference for potential cancellation
             self.active_crawls[crawl_id] = crawler
@@ -257,13 +294,36 @@ class CrawlerService:
             logger.warning(f"  config_obj type: {type(config_obj)}")
             logger.warning(f"  original config dict: {config}")
             
-            crawler = PlaywrightCrawler(
-                domain=domain,
-                config=config_obj,
-                db=self.db,
-                crawl_id=crawl_id,
-                org_id=org_id
-            )
+            # Choose crawler engine
+            crawler_engine = os.getenv('CRAWLER_ENGINE', 'firecrawl').lower()  # Default to Firecrawl
+            
+            if crawler_engine == 'firecrawl' and FIRECRAWL_AVAILABLE:
+                logger.info(f"🔥 Using Firecrawl engine for sync crawl {crawl_id}")
+                crawler = FirecrawlCrawler(
+                    domain=domain,
+                    config=config_obj,
+                    db=self.db,
+                    crawl_id=crawl_id,
+                    org_id=org_id
+                )
+            elif crawler_engine == 'scrapingbee' and os.getenv('SCRAPINGBEE_API_KEY'):
+                logger.info(f"🐝 Using ScrapingBee engine for sync crawl {crawl_id}")
+                crawler = ScrapingBeeCrawler(
+                    domain=domain,
+                    config=config_obj,
+                    db=self.db,
+                    crawl_id=crawl_id,
+                    org_id=org_id
+                )
+            else:
+                logger.info(f"🕷️ Using Playwright engine for sync crawl {crawl_id}")
+                crawler = PlaywrightCrawler(
+                    domain=domain,
+                    config=config_obj,
+                    db=self.db,
+                    crawl_id=crawl_id,
+                    org_id=org_id
+                )
             
             # Store crawler reference
             self.active_crawls[crawl_id] = crawler

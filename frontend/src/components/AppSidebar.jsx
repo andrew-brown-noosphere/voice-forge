@@ -22,6 +22,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import FormatQuoteIcon from '@mui/icons-material/FormatQuote'
 import DesignServicesIcon from '@mui/icons-material/DesignServices'
 import LayersIcon from '@mui/icons-material/Layers'
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'
 
 const drawerWidth = 240
 
@@ -38,6 +39,12 @@ const menuItems = [
     items: [
       { text: 'Recent Analysis', icon: <LanguageIcon />, path: '/crawls' },
       { text: 'New Analysis', icon: <LayersIcon />, path: '/crawls/new' },
+    ]
+  },
+  {
+    section: 'Signal Discovery',
+    items: [
+      { text: 'Social Signals', icon: <TrendingUpIcon />, path: '/signals' },
     ]
   },
   {
